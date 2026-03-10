@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fundraising App</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <nav id="navbar">
+    <h1>Fundraising</h1>
+    <div class="nav-links">
+      <a href="#" onclick="showPage('dashboard')" class="active">Dashboard</a>
+      <a href="#" onclick="showPage('map')">Map</a>
+      <a href="#" onclick="showPage('events')">Events</a>
+      <a href="#" onclick="showPage('imports')">Import Data</a>
+      <a href="#" onclick="showPage('houses')">Houses</a>
+    </div>
+  </nav>
+
+  <main>
+    <!-- Dashboard -->
+    <section id="page-dashboard" class="page active">
+      <h2>Dashboard</h2>
+      <div id="stats-grid" class="stats-grid"></div>
+    </section>
+
+    <!-- Map -->
+    <section id="page-map" class="page">
+      <h2>House Map</h2>
+      <div id="map" style="height:550px;border-radius:8px;"></div>
+    </section>
+
+    <!-- Events -->
+    <section id="page-events" class="page">
+      <h2>Events</h2>
+      <div class="card">
+        <h3>Create Event</h3>
+        <form id="event-form" class="inline-form">
+          <input name="name" placeholder="Event name" required />
+          <input name="description" placeholder="Description" />
+          <input name="event_date" type="date" />
+          <button type="submit">Create</button>
+        </form>
+      </div>
+      <div id="events-list" class="card-list"></div>
+    </section>
+
+    <!-- Event Detail (hidden, shown dynamically) -->
+    <section id="page-event-detail" class="page">
+      <h2 id="event-detail-title"></h2>
+      <div class="card">
+        <h3>Assign Houses</h3>
+        <form id="assign-form" class="inline-form">
+          <input name="zip_codes" placeholder="ZIP codes (comma-separated)" />
+          <input name="street_names" placeholder="Street names (comma-separated)" />
+          <input name="limit" type="number" placeholder="Limit" />
+          <input name="assigned_to" placeholder="Assigned to" />
+          <button type="submit">Assign</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>Assigned Houses</h3>
+        <div id="event-houses-list"></div>
+        <button id="btn-print-packet" onclick="printPacket()">Print Packet</button>
+      </div>
+    </section>
+
+    <!-- Imports -->
+    <section id="page-imports" class="page">
+      <h2>Import Public Data</h2>
+      <div class="card">
+        <h3>Upload Source File</h3>
+        <form id="import-form" class="inline-form" enctype="multipart/form-data">
+          <select name="source_name" required>
+            <option value="">Select source…</option>
+            <option value="dallas_gis">City of Dallas GIS Address Points</option>
+            <option value="dcad">DCAD Appraisal / Parcel Data</option>
+          </select>
+          <input name="file" type="file" accept=".csv,.json,.geojson" required />
+          <input name="notes" placeholder="Notes (optional)" />
+          <button type="submit">Import</button>
+        </form>
+        <div id="import-progress" class="hidden">
+          <p>Importing… <span id="import-status"></span></p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Import History</h3>
+        <div id="imports-list"></div>
+      </div>
+      <div class="card">
+        <h3>Unmatched Records</h3>
+        <div id="unmatched-list"></div>
+      </div>
+    </section>
+
+    <!-- Houses -->
+    <section id="page-houses" class="page">
+      <h2>Master Houses</h2>
+      <div class="card">
+        <div class="inline-form">
+          <input id="house-search" placeholder="Search address…" />
+          <input id="house-zip" placeholder="ZIP code" />
+          <button onclick="loadHouses()">Search</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Manually Add House</h3>
+        <form id="manual-house-form" class="inline-form">
+          <input name="full_address" placeholder="Full address" required />
+          <input name="zip_code" placeholder="ZIP" />
+          <input name="latitude" type="number" step="any" placeholder="Lat" />
+          <input name="longitude" type="number" step="any" placeholder="Lon" />
+          <button type="submit">Add</button>
+        </form>
+      </div>
+      <div id="houses-list" class="card-list"></div>
+    </section>
+
+    <!-- Visit Modal -->
+    <div id="visit-modal" class="modal hidden">
+      <div class="modal-content">
+        <span class="close" onclick="closeVisitModal()">&times;</span>
+        <h3>Record Visit</h3>
+        <form id="visit-form">
+          <input type="hidden" name="event_house_id" />
+          <input type="hidden" name="event_id" />
+          <label>Outcome
+            <select name="outcome" required>
+              <option value="donated">Donated</option>
+              <option value="pledged">Pledged</option>
+              <option value="not_home">Not Home</option>
+              <option value="refused">Refused</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>Donation Amount <input name="donation_amount" type="number" step="0.01" /></label>
+          <label>Tickets Purchased <input name="tickets_purchased" type="number" value="0" /></label>
+          <label>Notes <textarea name="notes"></textarea></label>
+          <label><input name="follow_up" type="checkbox" /> Follow-up needed</label>
+          <label>Volunteer <input name="volunteer_name" /></label>
+          <button type="submit">Save Visit</button>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
