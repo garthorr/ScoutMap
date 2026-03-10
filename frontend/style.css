@@ -143,6 +143,66 @@ tr:hover { background: #f5f7ff; }
 }
 .modal-content textarea { height: 60px; resize: vertical; }
 
+/* Tooltips */
+.tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.tooltip-wrap .tooltip {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e293b;
+  color: #fff;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: opacity .15s;
+  z-index: 100;
+}
+.tooltip-wrap .tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1e293b;
+}
+.tooltip-wrap:hover .tooltip {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Source guide accordions */
+.source-guides {
+  margin-bottom: 14px;
+}
+.source-guides details {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  background: #f8fafc;
+}
+.source-guides summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  color: #1a56db;
+}
+.source-guides ol {
+  margin: 8px 0 0 18px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #444;
+}
+
 .hidden { display: none !important; }
 
 /* Print */
