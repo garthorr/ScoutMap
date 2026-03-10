@@ -116,6 +116,13 @@ tr:hover { background: #f5f7ff; }
   font-size: 12px;
   background: #4f7cdb;
 }
+.btn-sm.btn-danger {
+  background: #dc3545;
+  color: #fff;
+}
+.btn-sm.btn-danger:hover {
+  background: #b02a37;
+}
 
 /* Modal */
 .modal {

@@ -232,15 +232,29 @@ async function loadImports() {
   const r = await fetch(API + "/api/imports/");
   const imports = await r.json();
   document.getElementById("imports-list").innerHTML = imports.length
-    ? `<table><tr><th>Source</th><th>File</th><th>Records</th><th>Status</th><th>Date</th></tr>` +
+    ? `<table><tr><th>Source</th><th>File</th><th>Records</th><th>Status</th><th>Date</th><th></th></tr>` +
       imports.map(i => `<tr>
         <td>${i.source_name}</td>
         <td>${i.file_name || "—"}</td>
         <td>${i.record_count}</td>
         <td><span class="badge badge-${i.status}">${i.status}</span></td>
         <td>${new Date(i.created_at).toLocaleString()}</td>
+        <td><button class="btn-sm btn-danger" onclick="deleteImport('${i.id}')">Delete</button></td>
       </tr>`).join("") + `</table>`
     : "<p>No imports yet.</p>";
+}
+
+async function deleteImport(id) {
+  if (!confirm("Delete this import and its records?")) return;
+  const r = await fetch(API + "/api/imports/" + id, { method: "DELETE" });
+  const data = await r.json();
+  if (r.ok) {
+    alert(`Deleted. ${data.houses_removed} house(s) removed, ${data.houses_kept} kept.`);
+    loadImports();
+    loadUnmatched();
+  } else {
+    alert("Delete failed: " + (data.detail || JSON.stringify(data)));
+  }
 }
 
 async function loadUnmatched() {
