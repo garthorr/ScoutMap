@@ -171,6 +171,40 @@ document.getElementById("visit-form").onsubmit = async (e) => {
 // --- Print packet ---
 function printPacket() { window.print(); }
 
+// --- ArcGIS Fetch ---
+document.getElementById("arcgis-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const zips = fd.get("zip_codes");
+  const body = {
+    max_records: parseInt(fd.get("max_records") || "2000"),
+    notes: fd.get("notes") || undefined,
+  };
+  if (zips) body.zip_codes = zips.split(",").map(s => s.trim()).filter(Boolean);
+  document.getElementById("arcgis-progress").classList.remove("hidden");
+  document.getElementById("arcgis-status").textContent = "connecting…";
+  try {
+    const r = await fetch(API + "/api/arcgis/fetch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      document.getElementById("arcgis-status").textContent =
+        `Done! Fetched ${data.fetched} parcels, imported ${data.imported} records.`;
+    } else {
+      document.getElementById("arcgis-status").textContent =
+        `Error: ${data.detail || "unknown"}`;
+    }
+  } catch (err) {
+    document.getElementById("arcgis-status").textContent = "Network error: " + err.message;
+  }
+  e.target.reset();
+  loadImports();
+  loadUnmatched();
+};
+
 // --- Imports ---
 document.getElementById("import-form").onsubmit = async (e) => {
   e.preventDefault();

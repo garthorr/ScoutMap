@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.database import engine, Base
-from app.routes import imports, houses, events, stats
+from app.routes import imports, houses, events, stats, arcgis
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
@@ -19,6 +19,7 @@ app.include_router(imports.router)
 app.include_router(houses.router)
 app.include_router(events.router)
 app.include_router(stats.router)
+app.include_router(arcgis.router)
 
 # Serve frontend static files
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
