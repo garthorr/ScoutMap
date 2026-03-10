@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import logging
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -8,6 +9,8 @@ from pathlib import Path
 from app.config import settings
 from app.database import engine, Base
 from app.routes import imports, houses, events, stats, arcgis
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
