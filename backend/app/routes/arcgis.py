@@ -1,7 +1,7 @@
 """ArcGIS REST API integration – fetch Dallas Tax Parcels directly.
 
-The service schema is discovered at startup via the FeatureServer metadata
-endpoint, so field name changes won't break the importer.
+Field names are auto-discovered by fetching a single sample record with
+outFields=* on the first request.
 """
 
 import json
@@ -23,83 +23,123 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/arcgis", tags=["arcgis"])
 
-ARCGIS_SERVICE = (
+ARCGIS_QUERY = (
     "https://services2.arcgis.com/rwnOSbfKSwyTBcwN"
-    "/ArcGIS/rest/services/DallasTaxParcels/FeatureServer/0"
+    "/ArcGIS/rest/services/DallasTaxParcels/FeatureServer/0/query"
 )
-ARCGIS_QUERY = ARCGIS_SERVICE + "/query"
 
 MAX_PAGE_SIZE = 1000
 
 # ---------------------------------------------------------------------------
 # Field mapping – maps our canonical names to possible ArcGIS field names.
-# At startup we discover the real schema; until then we try all candidates.
 # ---------------------------------------------------------------------------
 FIELD_CANDIDATES = {
-    "address":   ["SITEADDRESS", "SiteAddress", "SITUS_ADDRESS", "ADDRESS", "FULL_ADDRESS", "FULLADDR", "PROP_ADDR", "Site_Addr"],
-    "owner":     ["OWNERNAME", "OwnerName", "OWNER_NAME", "OWNER", "Owner"],
-    "parcel":    ["PARCELID", "ParcelId", "PARCEL_ID", "PARCEL", "GEO_ID", "Parcel_ID"],
-    "zip":       ["ZIPCODE", "ZipCode", "ZIP_CODE", "ZIP", "Zip", "SITUS_ZIP"],
-    "city":      ["CITY", "City", "SITUS_CITY"],
-    "state":     ["STATE", "State", "SITUS_STATE"],
-    "land_val":  ["LANDVAL", "LandVal", "LAND_VALUE", "Land_Val", "LandValue"],
-    "impr_val":  ["IMPRVAL", "ImprVal", "IMPR_VALUE", "Impr_Val", "ImprovementValue"],
-    "total_val": ["TOTALVAL", "TotalVal", "TOTAL_VALUE", "Total_Val", "MARKET_VALUE", "TotalValue", "APPRAISED_VALUE"],
-    "legal":     ["LEGALDESC", "LegalDesc", "LEGAL_DESC", "Legal_Desc", "LegalDescription"],
-    "objectid":  ["OBJECTID", "ObjectId", "FID"],
-    "acct":      ["ACCT", "ACCOUNT_NUM", "ACCOUNT", "AcctNum"],
+    "address":   ["SITEADDRESS", "SiteAddress", "SITUS_ADDRESS", "ADDRESS",
+                  "FULL_ADDRESS", "FULLADDR", "PROP_ADDR", "Site_Addr",
+                  "SitusAddress", "SITE_ADDR"],
+    "owner":     ["OWNERNAME", "OwnerName", "OWNER_NAME", "OWNER", "Owner",
+                  "OwnerName1"],
+    "parcel":    ["PARCELID", "ParcelId", "PARCEL_ID", "PARCEL", "GEO_ID",
+                  "Parcel_ID", "ACCTID", "Account"],
+    "zip":       ["ZIPCODE", "ZipCode", "ZIP_CODE", "ZIP", "Zip", "SITUS_ZIP",
+                  "SitusZip", "SITUS_ZIPCODE"],
+    "city":      ["CITY", "City", "SITUS_CITY", "SitusCity"],
+    "state":     ["STATE", "State", "SITUS_STATE", "SitusState"],
+    "land_val":  ["LANDVAL", "LandVal", "LAND_VALUE", "Land_Val", "LandValue",
+                  "LandMktVal", "LANDMKTVAL"],
+    "impr_val":  ["IMPRVAL", "ImprVal", "IMPR_VALUE", "Impr_Val",
+                  "ImprovementValue", "ImprMktVal", "IMPRMKTVAL"],
+    "total_val": ["TOTALVAL", "TotalVal", "TOTAL_VALUE", "Total_Val",
+                  "MARKET_VALUE", "TotalValue", "APPRAISED_VALUE",
+                  "TotalMktVal", "TOTALMKTVAL", "MktValTotal"],
+    "legal":     ["LEGALDESC", "LegalDesc", "LEGAL_DESC", "Legal_Desc",
+                  "LegalDescription", "Legal"],
+    "objectid":  ["OBJECTID", "ObjectId", "FID", "objectid"],
+    "acct":      ["ACCT", "ACCOUNT_NUM", "ACCOUNT", "AcctNum", "AccountNum"],
 }
 
 # Resolved field map – populated by _discover_fields()
 _field_map: dict[str, str | None] = {}
 _all_field_names: list[str] = []
-_zip_field: str | None = None
 _discovery_done = False
 
 
-async def _discover_fields():
-    """Hit the FeatureServer layer metadata to learn the actual field names."""
-    global _field_map, _all_field_names, _zip_field, _discovery_done
-    if _discovery_done:
-        return
+def _match_fields(real_names: set[str]):
+    """Match discovered field names to our canonical names."""
+    global _field_map, _all_field_names
+    _all_field_names = sorted(real_names)
 
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(ARCGIS_SERVICE, params={"f": "json"})
-            if resp.status_code != 200:
-                logger.warning("ArcGIS metadata returned %s", resp.status_code)
-                _discovery_done = True
-                return
-            meta = resp.json()
-    except Exception as exc:
-        logger.warning("ArcGIS metadata discovery failed: %s", exc)
-        _discovery_done = True
-        return
-
-    fields = meta.get("fields", [])
-    real_names = {f["name"] for f in fields}
-    _all_field_names.clear()
-    _all_field_names.extend(sorted(real_names))
+    # Case-insensitive matching
+    real_upper = {name.upper(): name for name in real_names}
 
     for canonical, candidates in FIELD_CANDIDATES.items():
         _field_map[canonical] = None
         for c in candidates:
+            # Exact match first
             if c in real_names:
                 _field_map[canonical] = c
                 break
+            # Case-insensitive match
+            if c.upper() in real_upper:
+                _field_map[canonical] = real_upper[c.upper()]
+                break
 
-    _zip_field = _field_map.get("zip")
+    logger.info("ArcGIS field map resolved: %s", _field_map)
+    logger.info("All ArcGIS fields: %s", _all_field_names)
+
+
+async def _discover_fields():
+    """Discover field names by fetching one sample record with outFields=*."""
+    global _discovery_done
+    if _discovery_done:
+        return
+
+    logger.info("Discovering ArcGIS field names via sample query...")
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(ARCGIS_QUERY, params={
+                "where": "1=1",
+                "outFields": "*",
+                "returnGeometry": "false",
+                "resultRecordCount": 1,
+                "f": "json",
+            })
+            logger.info("ArcGIS sample query HTTP %s", resp.status_code)
+
+            if resp.status_code != 200:
+                logger.error("ArcGIS sample query failed: HTTP %s", resp.status_code)
+                _discovery_done = True
+                return
+
+            data = resp.json()
+            if "error" in data:
+                logger.error("ArcGIS sample query error: %s", data["error"])
+                _discovery_done = True
+                return
+
+            features = data.get("features", [])
+            if not features:
+                logger.error("ArcGIS sample query returned 0 features")
+                _discovery_done = True
+                return
+
+            # Get field names from the first record's attributes
+            attrs = features[0].get("attributes", {})
+            real_names = set(attrs.keys())
+            logger.info("ArcGIS sample record keys: %s", sorted(real_names))
+            _match_fields(real_names)
+
+    except Exception as exc:
+        logger.error("ArcGIS discovery failed: %s", exc, exc_info=True)
+
     _discovery_done = True
-    logger.info("ArcGIS field map: %s", _field_map)
 
 
 def _resolved(canonical: str) -> str | None:
-    """Return the real ArcGIS field name for a canonical name, or None."""
     return _field_map.get(canonical)
 
 
 def _out_fields() -> str:
-    """Build outFields param from discovered fields (or * if unknown)."""
     resolved = [v for v in _field_map.values() if v]
     return ",".join(resolved) if resolved else "*"
 
@@ -121,14 +161,12 @@ class ArcGISFetchRequest(BaseModel):
 def _build_where(req: ArcGISFetchRequest) -> str:
     clauses = []
     if req.zip_codes:
-        zf = _zip_field
+        zf = _resolved("zip")
         if not zf:
-            # Fallback: try common names
-            for c in FIELD_CANDIDATES["zip"]:
-                zf = c
-                break
-        quoted = ",".join(f"'{z.strip()}'" for z in req.zip_codes)
-        clauses.append(f"{zf} IN ({quoted})")
+            logger.warning("No ZIP field discovered; ignoring zip_codes filter")
+        else:
+            quoted = ",".join(f"'{z.strip()}'" for z in req.zip_codes)
+            clauses.append(f"{zf} IN ({quoted})")
     return " AND ".join(clauses) if clauses else "1=1"
 
 
@@ -197,16 +235,22 @@ async def _fetch_all_pages(
                 params["spatialRel"] = "esriSpatialRelIntersects"
                 params["inSR"] = "4326"
 
+            logger.info("ArcGIS query: where=%s offset=%s limit=%s", where, offset, page_size)
             resp = await client.get(ARCGIS_QUERY, params=params)
             if resp.status_code != 200:
+                logger.error("ArcGIS query HTTP %s: %s", resp.status_code, resp.text[:500])
                 raise HTTPException(502, f"ArcGIS returned HTTP {resp.status_code}")
 
             data = resp.json()
             if "error" in data:
+                logger.error("ArcGIS query error: %s", json.dumps(data["error"]))
                 msg = data["error"].get("message", str(data["error"]))
-                raise HTTPException(502, f"ArcGIS error: {msg}")
+                details = data["error"].get("details", [])
+                full_msg = f"{msg}. Details: {details}" if details else msg
+                raise HTTPException(502, f"ArcGIS error: {full_msg}")
 
             features = data.get("features", [])
+            logger.info("ArcGIS returned %d features (offset=%d)", len(features), offset)
             all_features.extend(features)
 
             if not data.get("exceededTransferLimit", False) or not features:
@@ -227,7 +271,7 @@ async def get_arcgis_fields():
     return {
         "field_map": _field_map,
         "all_fields": _all_field_names,
-        "zip_field": _zip_field,
+        "discovery_done": _discovery_done,
     }
 
 
@@ -288,7 +332,6 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, db: Session = Depends(ge
             if "y" in geom and "x" in geom:
                 lat, lon = geom["y"], geom["x"]
             elif "rings" in geom:
-                # Compute centroid of first ring
                 ring = geom["rings"][0] if geom["rings"] else []
                 if ring:
                     lon = sum(p[0] for p in ring) / len(ring)
