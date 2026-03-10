@@ -11,11 +11,11 @@
   <nav id="navbar">
     <h1>ScoutMap</h1>
     <div class="nav-links">
-      <a href="#" onclick="showPage('dashboard')" class="active">Dashboard</a>
-      <a href="#" onclick="showPage('map')">Map</a>
-      <a href="#" onclick="showPage('events')">Events</a>
-      <a href="#" onclick="showPage('imports')">Import Data</a>
-      <a href="#" onclick="showPage('houses')">Houses</a>
+      <a href="#" onclick="showPage('dashboard')" class="active" title="Overview of key stats and totals">Dashboard</a>
+      <a href="#" onclick="showPage('map')" title="Interactive map of all house locations">Map</a>
+      <a href="#" onclick="showPage('events')" title="Create and manage fundraising events">Events</a>
+      <a href="#" onclick="showPage('imports')" title="Import public address and appraisal data">Import Data</a>
+      <a href="#" onclick="showPage('houses')" title="Search and manage the master house list">Houses</a>
     </div>
   </nav>
 
@@ -38,10 +38,19 @@
       <div class="card">
         <h3>Create Event</h3>
         <form id="event-form" class="inline-form">
-          <input name="name" placeholder="Event name" required />
-          <input name="description" placeholder="Description" />
-          <input name="event_date" type="date" />
-          <button type="submit">Create</button>
+          <span class="tooltip-wrap">
+            <input name="name" placeholder="Event name" required />
+            <span class="tooltip">A short name for this fundraising event</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="description" placeholder="Description" />
+            <span class="tooltip">Optional details about the event</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="event_date" type="date" />
+            <span class="tooltip">Scheduled date for the event</span>
+          </span>
+          <button type="submit" title="Create a new fundraising event">Create</button>
         </form>
       </div>
       <div id="events-list" class="card-list"></div>
@@ -53,17 +62,29 @@
       <div class="card">
         <h3>Assign Houses</h3>
         <form id="assign-form" class="inline-form">
-          <input name="zip_codes" placeholder="ZIP codes (comma-separated)" />
-          <input name="street_names" placeholder="Street names (comma-separated)" />
-          <input name="limit" type="number" placeholder="Limit" />
-          <input name="assigned_to" placeholder="Assigned to" />
-          <button type="submit">Assign</button>
+          <span class="tooltip-wrap">
+            <input name="zip_codes" placeholder="ZIP codes (comma-separated)" />
+            <span class="tooltip">Filter houses by ZIP code, e.g. 75201, 75202</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="street_names" placeholder="Street names (comma-separated)" />
+            <span class="tooltip">Filter by street name, e.g. Elm St, Main St</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="limit" type="number" placeholder="Limit" />
+            <span class="tooltip">Max number of houses to assign</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="assigned_to" placeholder="Assigned to" />
+            <span class="tooltip">Volunteer name for this assignment</span>
+          </span>
+          <button type="submit" title="Assign matching houses to this event">Assign</button>
         </form>
       </div>
       <div class="card">
         <h3>Assigned Houses</h3>
         <div id="event-houses-list"></div>
-        <button id="btn-print-packet" onclick="printPacket()">Print Packet</button>
+        <button id="btn-print-packet" onclick="printPacket()" title="Print a walk packet for assigned houses">Print Packet</button>
       </div>
     </section>
 
@@ -72,14 +93,43 @@
       <h2>Import Public Data</h2>
       <div class="card">
         <h3>Upload Source File</h3>
+        <div class="source-guides">
+          <details>
+            <summary>City of Dallas GIS Address Points</summary>
+            <ol>
+              <li>Visit the <strong>Dallas Open Data</strong> portal at <em>dallasopendata.com</em></li>
+              <li>Search for <strong>"Address Points"</strong> or browse the GIS / Maps category</li>
+              <li>Export as <strong>CSV</strong> or <strong>GeoJSON</strong></li>
+              <li>Select the file below and import</li>
+            </ol>
+          </details>
+          <details>
+            <summary>DCAD Appraisal / Parcel Data</summary>
+            <ol>
+              <li>Go to the <strong>Dallas Central Appraisal District</strong> site at <em>dcad.org</em></li>
+              <li>Navigate to <strong>Appraisal Data Downloads</strong> (usually under Commercial Services)</li>
+              <li>Download the residential <strong>parcel/appraisal CSV</strong> for your target area</li>
+              <li>Select the file below and import</li>
+            </ol>
+          </details>
+        </div>
         <form id="import-form" class="inline-form" enctype="multipart/form-data">
-          <select name="source_name" required>
-            <option value="">Select source…</option>
-            <option value="dallas_gis">City of Dallas GIS Address Points</option>
-            <option value="dcad">DCAD Appraisal / Parcel Data</option>
-          </select>
-          <input name="file" type="file" accept=".csv,.json,.geojson" required />
-          <input name="notes" placeholder="Notes (optional)" />
+          <span class="tooltip-wrap">
+            <select name="source_name" required>
+              <option value="">Select source…</option>
+              <option value="dallas_gis">City of Dallas GIS Address Points</option>
+              <option value="dcad">DCAD Appraisal / Parcel Data</option>
+            </select>
+            <span class="tooltip">Choose the public data source that matches your file</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="file" type="file" accept=".csv,.json,.geojson" required />
+            <span class="tooltip">CSV, JSON, or GeoJSON exported from the data portal</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="notes" placeholder="Notes (optional)" />
+            <span class="tooltip">Optional label to identify this import batch</span>
+          </span>
           <button type="submit">Import</button>
         </form>
         <div id="import-progress" class="hidden">
@@ -101,19 +151,37 @@
       <h2>Master Houses</h2>
       <div class="card">
         <div class="inline-form">
-          <input id="house-search" placeholder="Search address…" />
-          <input id="house-zip" placeholder="ZIP code" />
-          <button onclick="loadHouses()">Search</button>
+          <span class="tooltip-wrap">
+            <input id="house-search" placeholder="Search address…" />
+            <span class="tooltip">Search by full or partial address</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input id="house-zip" placeholder="ZIP code" />
+            <span class="tooltip">Filter results to a specific ZIP code</span>
+          </span>
+          <button onclick="loadHouses()" title="Search the master house list">Search</button>
         </div>
       </div>
       <div class="card">
         <h3>Manually Add House</h3>
         <form id="manual-house-form" class="inline-form">
-          <input name="full_address" placeholder="Full address" required />
-          <input name="zip_code" placeholder="ZIP" />
-          <input name="latitude" type="number" step="any" placeholder="Lat" />
-          <input name="longitude" type="number" step="any" placeholder="Lon" />
-          <button type="submit">Add</button>
+          <span class="tooltip-wrap">
+            <input name="full_address" placeholder="Full address" required />
+            <span class="tooltip">Full street address, e.g. 123 Elm St</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="zip_code" placeholder="ZIP" />
+            <span class="tooltip">5-digit ZIP code</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="latitude" type="number" step="any" placeholder="Lat" />
+            <span class="tooltip">GPS latitude for map placement</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="longitude" type="number" step="any" placeholder="Lon" />
+            <span class="tooltip">GPS longitude for map placement</span>
+          </span>
+          <button type="submit" title="Add this house to the master list">Add</button>
         </form>
       </div>
       <div id="houses-list" class="card-list"></div>
