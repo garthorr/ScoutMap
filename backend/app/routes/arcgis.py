@@ -264,6 +264,40 @@ async def _fetch_all_pages(
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@router.get("/test")
+async def test_arcgis_connection():
+    """Diagnostic: fetch 1 record from ArcGIS and return the raw response."""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(ARCGIS_QUERY, params={
+                "where": "1=1",
+                "outFields": "*",
+                "returnGeometry": "true",
+                "resultRecordCount": 1,
+                "f": "json",
+            })
+            raw = resp.json()
+            return {
+                "http_status": resp.status_code,
+                "has_error": "error" in raw,
+                "error": raw.get("error"),
+                "feature_count": len(raw.get("features", [])),
+                "sample_attributes": (
+                    raw["features"][0].get("attributes", {})
+                    if raw.get("features") else None
+                ),
+                "sample_geometry_keys": (
+                    list(raw["features"][0].get("geometry", {}).keys())
+                    if raw.get("features") else None
+                ),
+                "field_map": _field_map,
+                "all_discovered_fields": _all_field_names,
+                "discovery_done": _discovery_done,
+            }
+    except Exception as exc:
+        return {"error": str(exc), "type": type(exc).__name__}
+
+
 @router.get("/fields")
 async def get_arcgis_fields():
     """Return the discovered field names from the ArcGIS service."""
