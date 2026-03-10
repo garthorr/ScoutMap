@@ -21,7 +21,7 @@ import app.importers.dcad  # noqa: F401
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
-UPLOAD_DIR = Path("/tmp/fundraiser_uploads")
+UPLOAD_DIR = Path("/tmp/scoutmap_uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 

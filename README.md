@@ -1,4 +1,4 @@
-# Fundraising App
+# ScoutMap
 
 A door-to-door fundraising management application that uses **public data as the primary source** for address/house records, minimizing manual data entry. Built for neighborhood fundraising campaigns in Dallas, TX.
 
@@ -22,7 +22,7 @@ A door-to-door fundraising management application that uses **public data as the
 ```bash
 # Clone and start
 git clone <repo-url>
-cd Fundraising
+cd ScoutMap
 docker compose up --build
 
 # App is available at http://localhost:8000
@@ -194,7 +194,7 @@ The `sample_data/` directory contains sample CSV files for testing:
 
 ```bash
 # Run without Docker (requires local PostgreSQL)
-export DATABASE_URL=postgresql://user:pass@localhost:5432/fundraiser
+export DATABASE_URL=postgresql://user:pass@localhost:5432/scoutmap
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --reload
