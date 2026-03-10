@@ -1,7 +1,14 @@
 """ArcGIS REST API integration – fetch Dallas Tax Parcels directly.
 
-Field names are auto-discovered by fetching a single sample record with
-outFields=* on the first request.
+Schema (from /FeatureServer/0 sample):
+  ST_NUM, ST_NAME, ST_TYPE, ST_DIR  → composed into full address
+  TAXPANAME1                        → owner name
+  ACCT / GIS_ACCT                   → account / parcel ID
+  TAXPAZIP                          → 9-digit ZIP+4 (truncate to 5)
+  CITY                              → city
+  LEGAL_1..LEGAL_5                  → legal description parts
+  PROP_CL, SPTBCODE, ResCom         → property classification
+  geometry.rings                    → polygon (compute centroid)
 """
 
 import json
@@ -28,125 +35,17 @@ ARCGIS_QUERY = (
     "/ArcGIS/rest/services/DallasTaxParcels/FeatureServer/0/query"
 )
 
+# Only request the fields we actually use
+OUT_FIELDS = ",".join([
+    "OBJECTID", "ST_NUM", "ST_NAME", "ST_TYPE", "ST_DIR", "UNITID",
+    "TAXPANAME1", "ACCT", "GIS_ACCT",
+    "TAXPAZIP", "CITY", "COUNTY",
+    "LEGAL_1", "LEGAL_2", "LEGAL_3",
+    "PROP_CL", "ResCom",
+])
+
 MAX_PAGE_SIZE = 1000
 
-# ---------------------------------------------------------------------------
-# Field mapping – maps our canonical names to possible ArcGIS field names.
-# ---------------------------------------------------------------------------
-FIELD_CANDIDATES = {
-    "address":   ["SITEADDRESS", "SiteAddress", "SITUS_ADDRESS", "ADDRESS",
-                  "FULL_ADDRESS", "FULLADDR", "PROP_ADDR", "Site_Addr",
-                  "SitusAddress", "SITE_ADDR"],
-    "owner":     ["OWNERNAME", "OwnerName", "OWNER_NAME", "OWNER", "Owner",
-                  "OwnerName1"],
-    "parcel":    ["PARCELID", "ParcelId", "PARCEL_ID", "PARCEL", "GEO_ID",
-                  "Parcel_ID", "ACCTID", "Account"],
-    "zip":       ["ZIPCODE", "ZipCode", "ZIP_CODE", "ZIP", "Zip", "SITUS_ZIP",
-                  "SitusZip", "SITUS_ZIPCODE"],
-    "city":      ["CITY", "City", "SITUS_CITY", "SitusCity"],
-    "state":     ["STATE", "State", "SITUS_STATE", "SitusState"],
-    "land_val":  ["LANDVAL", "LandVal", "LAND_VALUE", "Land_Val", "LandValue",
-                  "LandMktVal", "LANDMKTVAL"],
-    "impr_val":  ["IMPRVAL", "ImprVal", "IMPR_VALUE", "Impr_Val",
-                  "ImprovementValue", "ImprMktVal", "IMPRMKTVAL"],
-    "total_val": ["TOTALVAL", "TotalVal", "TOTAL_VALUE", "Total_Val",
-                  "MARKET_VALUE", "TotalValue", "APPRAISED_VALUE",
-                  "TotalMktVal", "TOTALMKTVAL", "MktValTotal"],
-    "legal":     ["LEGALDESC", "LegalDesc", "LEGAL_DESC", "Legal_Desc",
-                  "LegalDescription", "Legal"],
-    "objectid":  ["OBJECTID", "ObjectId", "FID", "objectid"],
-    "acct":      ["ACCT", "ACCOUNT_NUM", "ACCOUNT", "AcctNum", "AccountNum"],
-}
-
-# Resolved field map – populated by _discover_fields()
-_field_map: dict[str, str | None] = {}
-_all_field_names: list[str] = []
-_discovery_done = False
-
-
-def _match_fields(real_names: set[str]):
-    """Match discovered field names to our canonical names."""
-    global _field_map, _all_field_names
-    _all_field_names = sorted(real_names)
-
-    # Case-insensitive matching
-    real_upper = {name.upper(): name for name in real_names}
-
-    for canonical, candidates in FIELD_CANDIDATES.items():
-        _field_map[canonical] = None
-        for c in candidates:
-            # Exact match first
-            if c in real_names:
-                _field_map[canonical] = c
-                break
-            # Case-insensitive match
-            if c.upper() in real_upper:
-                _field_map[canonical] = real_upper[c.upper()]
-                break
-
-    logger.info("ArcGIS field map resolved: %s", _field_map)
-    logger.info("All ArcGIS fields: %s", _all_field_names)
-
-
-async def _discover_fields():
-    """Discover field names by fetching one sample record with outFields=*."""
-    global _discovery_done
-    if _discovery_done:
-        return
-
-    logger.info("Discovering ArcGIS field names via sample query...")
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(ARCGIS_QUERY, params={
-                "where": "1=1",
-                "outFields": "*",
-                "returnGeometry": "false",
-                "resultRecordCount": 1,
-                "f": "json",
-            })
-            logger.info("ArcGIS sample query HTTP %s", resp.status_code)
-
-            if resp.status_code != 200:
-                logger.error("ArcGIS sample query failed: HTTP %s", resp.status_code)
-                _discovery_done = True
-                return
-
-            data = resp.json()
-            if "error" in data:
-                logger.error("ArcGIS sample query error: %s", data["error"])
-                _discovery_done = True
-                return
-
-            features = data.get("features", [])
-            if not features:
-                logger.error("ArcGIS sample query returned 0 features")
-                _discovery_done = True
-                return
-
-            # Get field names from the first record's attributes
-            attrs = features[0].get("attributes", {})
-            real_names = set(attrs.keys())
-            logger.info("ArcGIS sample record keys: %s", sorted(real_names))
-            _match_fields(real_names)
-
-    except Exception as exc:
-        logger.error("ArcGIS discovery failed: %s", exc, exc_info=True)
-
-    _discovery_done = True
-
-
-def _resolved(canonical: str) -> str | None:
-    return _field_map.get(canonical)
-
-
-def _out_fields() -> str:
-    resolved = [v for v in _field_map.values() if v]
-    return ",".join(resolved) if resolved else "*"
-
-
-# ---------------------------------------------------------------------------
-# Request / helpers
-# ---------------------------------------------------------------------------
 
 class ArcGISFetchRequest(BaseModel):
     zip_codes: Optional[list[str]] = None
@@ -159,15 +58,77 @@ class ArcGISFetchRequest(BaseModel):
 
 
 def _build_where(req: ArcGISFetchRequest) -> str:
+    """Build ArcGIS WHERE clause. TAXPAZIP is 9 digits, so use LIKE for 5-digit input."""
     clauses = []
     if req.zip_codes:
-        zf = _resolved("zip")
-        if not zf:
-            logger.warning("No ZIP field discovered; ignoring zip_codes filter")
+        parts = []
+        for z in req.zip_codes:
+            z = z.strip()
+            if len(z) == 5:
+                parts.append(f"TAXPAZIP LIKE '{z}%'")
+            else:
+                parts.append(f"TAXPAZIP = '{z}'")
+        if len(parts) == 1:
+            clauses.append(parts[0])
         else:
-            quoted = ",".join(f"'{z.strip()}'" for z in req.zip_codes)
-            clauses.append(f"{zf} IN ({quoted})")
+            clauses.append("(" + " OR ".join(parts) + ")")
     return " AND ".join(clauses) if clauses else "1=1"
+
+
+def _compose_address(attrs: dict) -> str:
+    """Build a full street address from component fields."""
+    num = str(attrs.get("ST_NUM") or "").strip()
+    direction = str(attrs.get("ST_DIR") or "").strip()
+    name = str(attrs.get("ST_NAME") or "").strip()
+    stype = str(attrs.get("ST_TYPE") or "").strip()
+    unit = str(attrs.get("UNITID") or "").strip()
+
+    if not num or not name:
+        return ""
+
+    parts = [num]
+    if direction:
+        parts.append(direction)
+    parts.append(name)
+    if stype:
+        parts.append(stype)
+    addr = " ".join(parts)
+    if unit:
+        addr += f" #{unit}"
+    return addr
+
+
+def _get_zip5(attrs: dict) -> str:
+    """Extract 5-digit ZIP from TAXPAZIP (which may be 9-digit ZIP+4)."""
+    raw = str(attrs.get("TAXPAZIP") or "").strip()
+    if len(raw) >= 5:
+        return raw[:5]
+    return raw
+
+
+def _get_legal(attrs: dict) -> str:
+    """Concatenate LEGAL_1 through LEGAL_5."""
+    parts = []
+    for i in range(1, 6):
+        val = attrs.get(f"LEGAL_{i}")
+        if val and str(val).strip():
+            parts.append(str(val).strip())
+    return " / ".join(parts) if parts else ""
+
+
+def _centroid(geom: dict) -> tuple[Optional[float], Optional[float]]:
+    """Compute centroid from polygon rings or point geometry."""
+    if not geom:
+        return None, None
+    if "y" in geom and "x" in geom:
+        return geom["y"], geom["x"]
+    if "rings" in geom:
+        ring = geom["rings"][0] if geom["rings"] else []
+        if ring:
+            lon = sum(p[0] for p in ring) / len(ring)
+            lat = sum(p[1] for p in ring) / len(ring)
+            return lat, lon
+    return None, None
 
 
 def _float_or_none(val) -> Optional[float]:
@@ -177,35 +138,6 @@ def _float_or_none(val) -> Optional[float]:
         return float(val)
     except (ValueError, TypeError):
         return None
-
-
-def _get_attr(attrs: dict, canonical: str, default=""):
-    """Look up a value by canonical name using the resolved field map."""
-    real = _resolved(canonical)
-    if real:
-        val = attrs.get(real)
-        if val not in (None, "", "Null"):
-            return str(val).strip()
-    # Fallback: try all candidates
-    for c in FIELD_CANDIDATES.get(canonical, []):
-        val = attrs.get(c)
-        if val not in (None, "", "Null"):
-            return str(val).strip()
-    return default
-
-
-def _get_attr_raw(attrs: dict, canonical: str):
-    """Like _get_attr but returns the raw value (for numbers)."""
-    real = _resolved(canonical)
-    if real:
-        val = attrs.get(real)
-        if val is not None:
-            return val
-    for c in FIELD_CANDIDATES.get(canonical, []):
-        val = attrs.get(c)
-        if val is not None:
-            return val
-    return None
 
 
 async def _fetch_all_pages(
@@ -222,7 +154,7 @@ async def _fetch_all_pages(
         while len(all_features) < max_records:
             params = {
                 "where": where,
-                "outFields": _out_fields(),
+                "outFields": OUT_FIELDS,
                 "returnGeometry": "true",
                 "outSR": "4326",
                 "f": "json",
@@ -237,13 +169,14 @@ async def _fetch_all_pages(
 
             logger.info("ArcGIS query: where=%s offset=%s limit=%s", where, offset, page_size)
             resp = await client.get(ARCGIS_QUERY, params=params)
+
             if resp.status_code != 200:
-                logger.error("ArcGIS query HTTP %s: %s", resp.status_code, resp.text[:500])
+                logger.error("ArcGIS HTTP %s: %s", resp.status_code, resp.text[:500])
                 raise HTTPException(502, f"ArcGIS returned HTTP {resp.status_code}")
 
             data = resp.json()
             if "error" in data:
-                logger.error("ArcGIS query error: %s", json.dumps(data["error"]))
+                logger.error("ArcGIS error: %s", json.dumps(data["error"]))
                 msg = data["error"].get("message", str(data["error"]))
                 details = data["error"].get("details", [])
                 full_msg = f"{msg}. Details: {details}" if details else msg
@@ -277,43 +210,31 @@ async def test_arcgis_connection():
                 "f": "json",
             })
             raw = resp.json()
+            sample_attrs = (
+                raw["features"][0].get("attributes", {})
+                if raw.get("features") else None
+            )
+            # Show what address we'd compose
+            composed_addr = _compose_address(sample_attrs) if sample_attrs else None
             return {
                 "http_status": resp.status_code,
                 "has_error": "error" in raw,
                 "error": raw.get("error"),
                 "feature_count": len(raw.get("features", [])),
-                "sample_attributes": (
-                    raw["features"][0].get("attributes", {})
-                    if raw.get("features") else None
-                ),
+                "composed_address": composed_addr,
+                "sample_attributes": sample_attrs,
                 "sample_geometry_keys": (
                     list(raw["features"][0].get("geometry", {}).keys())
                     if raw.get("features") else None
                 ),
-                "field_map": _field_map,
-                "all_discovered_fields": _all_field_names,
-                "discovery_done": _discovery_done,
             }
     except Exception as exc:
         return {"error": str(exc), "type": type(exc).__name__}
 
 
-@router.get("/fields")
-async def get_arcgis_fields():
-    """Return the discovered field names from the ArcGIS service."""
-    await _discover_fields()
-    return {
-        "field_map": _field_map,
-        "all_fields": _all_field_names,
-        "discovery_done": _discovery_done,
-    }
-
-
 @router.post("/fetch")
 async def fetch_arcgis_parcels(req: ArcGISFetchRequest, db: Session = Depends(get_db)):
     """Fetch tax parcels from Dallas ArcGIS and import into the database."""
-    await _discover_fields()
-
     where = _build_where(req)
     bbox = None
     if all(v is not None for v in [req.bbox_xmin, req.bbox_ymin, req.bbox_xmax, req.bbox_ymax]):
@@ -326,7 +247,6 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, db: Session = Depends(ge
     if not features:
         return {"status": "ok", "fetched": 0, "imported": 0, "message": "No parcels found for that query."}
 
-    # Create a SourceImport record
     batch_id = str(uuid.uuid4())
     si = SourceImport(
         source_name="arcgis_parcels",
@@ -344,32 +264,19 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, db: Session = Depends(ge
         attrs = feat.get("attributes", {})
         geom = feat.get("geometry", {})
 
-        full_addr = _get_attr(attrs, "address")
+        full_addr = _compose_address(attrs)
         if not full_addr:
             continue
 
         norm = normalize_address(full_addr)
-        owner = _get_attr(attrs, "owner")
-        parcel = _get_attr(attrs, "parcel")
-        zip_code = _get_attr(attrs, "zip")
-        city = _get_attr(attrs, "city", default="Dallas")
-        state = _get_attr(attrs, "state", default="TX")
-        land_val = _float_or_none(_get_attr_raw(attrs, "land_val"))
-        impr_val = _float_or_none(_get_attr_raw(attrs, "impr_val"))
-        total_val = _float_or_none(_get_attr_raw(attrs, "total_val"))
-        legal = _get_attr(attrs, "legal")
-        object_id = str(_get_attr_raw(attrs, "objectid") or uuid.uuid4())
+        owner = str(attrs.get("TAXPANAME1") or "").strip() or None
+        acct = str(attrs.get("ACCT") or attrs.get("GIS_ACCT") or "").strip() or None
+        zip_code = _get_zip5(attrs)
+        city = str(attrs.get("CITY") or "").strip() or "Dallas"
+        legal = _get_legal(attrs)
+        object_id = str(attrs.get("OBJECTID", uuid.uuid4()))
 
-        # Geometry may be a point (x/y) or a polygon ring centroid
-        lat = lon = None
-        if geom:
-            if "y" in geom and "x" in geom:
-                lat, lon = geom["y"], geom["x"]
-            elif "rings" in geom:
-                ring = geom["rings"][0] if geom["rings"] else []
-                if ring:
-                    lon = sum(p[0] for p in ring) / len(ring)
-                    lat = sum(p[1] for p in ring) / len(ring)
+        lat, lon = _centroid(geom)
 
         if not norm:
             db.add(UnmatchedRecord(
@@ -390,20 +297,14 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, db: Session = Depends(ge
             house = existing
             if owner and not house.owner_name:
                 house.owner_name = owner
-            if parcel and not house.parcel_id:
-                house.parcel_id = parcel
+            if acct and not house.account_number:
+                house.account_number = acct
             if not house.latitude and lat:
                 house.latitude = float(lat)
             if not house.longitude and lon:
                 house.longitude = float(lon)
             if legal and not house.legal_description:
                 house.legal_description = legal
-            if land_val is not None:
-                house.land_value = land_val
-            if impr_val is not None:
-                house.improvement_value = impr_val
-            if total_val is not None:
-                house.total_appraised_value = total_val
             match_method = "exact"
         else:
             parts = parse_address_parts(full_addr)
@@ -414,16 +315,13 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, db: Session = Depends(ge
                 street_name=parts["street_name"],
                 unit=parts["unit"],
                 city=city,
-                state=state,
+                state="TX",
                 zip_code=zip_code,
                 latitude=float(lat) if lat else None,
                 longitude=float(lon) if lon else None,
-                owner_name=owner or None,
-                parcel_id=parcel or None,
+                owner_name=owner,
+                account_number=acct,
                 legal_description=legal or None,
-                land_value=land_val,
-                improvement_value=impr_val,
-                total_appraised_value=total_val,
             )
             db.add(house)
             db.flush()

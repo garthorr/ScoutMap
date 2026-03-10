@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.database import get_db
-from app.models import SourceImport, UnmatchedRecord
+from app.models import SourceImport, UnmatchedRecord, HouseSourceLink, MasterHouse, EventHouse
 from app.schemas import SourceImportOut, UnmatchedRecordOut
 from app.importers import get_importer
 
@@ -79,6 +79,77 @@ def get_import(import_id: str, db: Session = Depends(get_db)):
     if not si:
         raise HTTPException(404, "Import not found")
     return si
+
+
+@router.delete("/{import_id}")
+def delete_import(import_id: str, db: Session = Depends(get_db)):
+    """Delete an import and its associated records.
+
+    Houses that were ONLY linked to this import (and aren't manually created
+    or assigned to any event) are also removed.
+    """
+    si = db.query(SourceImport).get(import_id)
+    if not si:
+        raise HTTPException(404, "Import not found")
+
+    # Find house IDs linked to this import
+    linked_house_ids = [
+        row[0] for row in
+        db.query(HouseSourceLink.house_id)
+        .filter(HouseSourceLink.source_import_id == si.id)
+        .all()
+    ]
+
+    # Delete source links for this import
+    db.query(HouseSourceLink).filter(
+        HouseSourceLink.source_import_id == si.id
+    ).delete(synchronize_session=False)
+
+    # Delete unmatched records for this import
+    db.query(UnmatchedRecord).filter(
+        UnmatchedRecord.source_import_id == si.id
+    ).delete(synchronize_session=False)
+
+    # Remove houses that have no remaining source links, aren't manually
+    # created, and aren't assigned to any event
+    houses_deleted = 0
+    if linked_house_ids:
+        for house_id in linked_house_ids:
+            # Skip if house still has other source links
+            other_links = db.query(HouseSourceLink.id).filter(
+                HouseSourceLink.house_id == house_id
+            ).first()
+            if other_links:
+                continue
+
+            house = db.query(MasterHouse).get(house_id)
+            if not house:
+                continue
+
+            # Skip manually created houses
+            if house.manually_created:
+                continue
+
+            # Skip houses assigned to events
+            event_link = db.query(EventHouse.id).filter(
+                EventHouse.house_id == house_id
+            ).first()
+            if event_link:
+                continue
+
+            db.delete(house)
+            houses_deleted += 1
+
+    # Delete the import record itself
+    db.delete(si)
+    db.commit()
+
+    return {
+        "status": "ok",
+        "deleted_import": import_id,
+        "houses_removed": houses_deleted,
+        "houses_kept": len(linked_house_ids) - houses_deleted,
+    }
 
 
 @router.get("/unmatched/", response_model=list[UnmatchedRecordOut])
