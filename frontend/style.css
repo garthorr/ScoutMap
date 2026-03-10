@@ -45,6 +45,16 @@ h3 { margin-bottom: 10px; font-size: 16px; color: #555; }
   margin-bottom: 16px;
   box-shadow: 0 1px 3px rgba(0,0,0,.08);
 }
+.card-highlight {
+  border-left: 4px solid #1a56db;
+  background: #f0f5ff;
+}
+.help-text {
+  font-size: 13px;
+  color: #555;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
 
 .stats-grid {
   display: grid;
