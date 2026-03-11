@@ -1,20 +1,21 @@
 /* global L */
 const API = "";
-let map, markersLayer, currentEventId;
+let map, markersLayer, currentEventId, currentEventName;
 
 // --- Navigation ---
-function showPage(name) {
+function showPage(name, evt) {
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   document.querySelectorAll(".nav-links a").forEach(a => a.classList.remove("active"));
   const el = document.getElementById("page-" + name);
   if (el) el.classList.add("active");
-  event?.target?.classList?.add("active");
+  if (evt?.target?.tagName === "A") evt.target.classList.add("active");
 
   if (name === "dashboard") loadDashboard();
   if (name === "map") initMap();
   if (name === "events") loadEvents();
   if (name === "imports") { loadImports(); loadUnmatched(); }
   if (name === "houses") loadHouses();
+  if (name === "walk-groups") loadWalkGroupEvents();
 }
 
 // --- Dashboard ---
@@ -97,6 +98,7 @@ document.getElementById("event-form").onsubmit = async (e) => {
 
 async function openEvent(id, name) {
   currentEventId = id;
+  currentEventName = name;
   document.getElementById("event-detail-title").textContent = name;
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   document.getElementById("page-event-detail").classList.add("active");
@@ -107,7 +109,7 @@ async function loadEventHouses() {
   const r = await fetch(API + `/api/events/${currentEventId}/houses`);
   const houses = await r.json();
   const el = document.getElementById("event-houses-list");
-  if (!houses.length) { el.innerHTML = "<p>No houses assigned.</p>"; return; }
+  if (!houses.length) { el.innerHTML = "<p>No houses assigned. Use Walk Groups or Manual Assign to add houses.</p>"; return; }
 
   // Group by assigned_to label
   const groups = {};
@@ -134,38 +136,6 @@ async function loadEventHouses() {
   el.innerHTML = html;
 }
 
-document.getElementById("walk-group-form").onsubmit = async (e) => {
-  e.preventDefault();
-  const fd = new FormData(e.target);
-  const body = {
-    zip_code: fd.get("zip_code"),
-    group_size: parseInt(fd.get("group_size") || "20"),
-  };
-  const streets = fd.get("street_names");
-  if (streets) body.street_names = streets.split(",").map(s => s.trim()).filter(Boolean);
-  const resultEl = document.getElementById("walk-group-result");
-  resultEl.classList.remove("hidden");
-  resultEl.textContent = "Generating groups…";
-  try {
-    const r = await fetch(API + `/api/events/${currentEventId}/walk-groups`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await r.json();
-    if (r.ok && data.groups?.length) {
-      resultEl.innerHTML = `<strong>${data.groups.length} groups created (${data.total_assigned} new houses assigned)</strong>` +
-        `<ul>` + data.groups.map(g => `<li>${g.label} — ${g.houses} houses</li>`).join("") + `</ul>`;
-      loadEventHouses();
-    } else if (r.ok) {
-      resultEl.textContent = data.message || "No houses found.";
-    } else {
-      resultEl.textContent = "Error: " + (data.detail || JSON.stringify(data));
-    }
-  } catch (err) {
-    resultEl.textContent = "Network error: " + err.message;
-  }
-};
-
 document.getElementById("assign-form").onsubmit = async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
@@ -185,6 +155,90 @@ document.getElementById("assign-form").onsubmit = async (e) => {
   e.target.reset();
   loadEventHouses();
 };
+
+// --- Walk Groups ---
+async function loadWalkGroupEvents() {
+  const r = await fetch(API + "/api/events/");
+  const events = await r.json();
+  const sel = document.getElementById("wg-event-select");
+  sel.innerHTML = '<option value="">Select an event…</option>' +
+    events.map(e => {
+      const selected = e.id === currentEventId ? " selected" : "";
+      return `<option value="${e.id}"${selected}>${e.name}</option>`;
+    }).join("");
+  // Load groups if event already selected
+  if (currentEventId) loadWalkGroupList();
+}
+
+document.getElementById("wg-event-select").onchange = (e) => {
+  currentEventId = e.target.value;
+  const opt = e.target.options[e.target.selectedIndex];
+  currentEventName = opt.textContent;
+  if (currentEventId) loadWalkGroupList();
+  else document.getElementById("wg-groups-list").innerHTML = "";
+};
+
+document.getElementById("walk-group-form").onsubmit = async (e) => {
+  e.preventDefault();
+  if (!currentEventId) { alert("Select an event first."); return; }
+  const fd = new FormData(e.target);
+  const body = {
+    zip_code: fd.get("zip_code"),
+    group_size: parseInt(fd.get("group_size") || "20"),
+  };
+  const streets = fd.get("street_names");
+  if (streets) body.street_names = streets.split(",").map(s => s.trim()).filter(Boolean);
+  const resultEl = document.getElementById("walk-group-result");
+  resultEl.classList.remove("hidden");
+  resultEl.textContent = "Generating groups…";
+  try {
+    const r = await fetch(API + `/api/events/${currentEventId}/walk-groups`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (r.ok && data.groups?.length) {
+      resultEl.innerHTML = `<strong>${data.groups.length} groups created (${data.total_assigned} new houses assigned)</strong>` +
+        `<ul>` + data.groups.map(g => `<li>${g.label} — ${g.houses} houses</li>`).join("") + `</ul>`;
+      loadWalkGroupList();
+    } else if (r.ok) {
+      resultEl.textContent = data.message || "No houses found.";
+    } else {
+      resultEl.textContent = "Error: " + (data.detail || JSON.stringify(data));
+    }
+  } catch (err) {
+    resultEl.textContent = "Network error: " + err.message;
+  }
+};
+
+async function loadWalkGroupList() {
+  if (!currentEventId) return;
+  const r = await fetch(API + `/api/events/${currentEventId}/houses`);
+  const houses = await r.json();
+  const el = document.getElementById("wg-groups-list");
+  if (!houses.length) { el.innerHTML = "<p>No groups yet. Generate walk groups above.</p>"; return; }
+
+  const groups = {};
+  houses.forEach(eh => {
+    const key = eh.assigned_to || "Unassigned";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(eh);
+  });
+
+  let html = "";
+  for (const [label, items] of Object.entries(groups)) {
+    const visited = items.filter(eh => eh.status === "visited").length;
+    html += `<details><summary><strong>${label}</strong> — ${items.length} houses, ${visited} visited</summary>`;
+    html += `<table><tr><th>#</th><th>Address</th><th>Owner</th></tr>`;
+    html += items.map((eh, idx) => `<tr>
+      <td>${idx + 1}</td>
+      <td>${eh.house.full_address}</td>
+      <td>${eh.house.owner_name || "—"}</td>
+    </tr>`).join("");
+    html += `</table></details>`;
+  }
+  el.innerHTML = html;
+}
 
 // --- Visits ---
 function openVisitModal(eventId, eventHouseId) {
