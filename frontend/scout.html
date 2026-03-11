@@ -36,26 +36,40 @@
       z-index: 100;
     }
     header h1 { font-size: 18px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
     #scout-info-badge {
       font-size: 12px;
       background: rgba(255,255,255,.15);
       padding: 4px 10px;
       border-radius: 12px;
-      max-width: 50%;
+      max-width: 140px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    #logout-btn {
+      font-size: 12px;
+      background: rgba(255,255,255,.2);
+      color: var(--sa-white);
+      border: 1px solid rgba(255,255,255,.3);
+      padding: 4px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: .3px;
+      font-weight: 600;
+    }
+    #logout-btn:hover { background: rgba(255,255,255,.35); }
     .container {
       max-width: 600px;
       margin: 0 auto;
       padding: 16px;
     }
-
-    /* --- Setup screen --- */
-    #setup-screen .card,
-    #house-list-screen .card,
-    #house-form-screen .card {
+    .card {
       background: var(--sa-white);
       border-radius: 10px;
       padding: 20px;
@@ -95,6 +109,9 @@
       box-shadow: 0 0 0 3px rgba(0,63,135,.15);
     }
     .field textarea { height: 70px; resize: vertical; }
+    /* Other name write-in — hidden by default */
+    #other-name-wrap { display: none; margin-top: 8px; }
+    #other-name-wrap.visible { display: block; }
     .btn {
       display: block;
       width: 100%;
@@ -112,10 +129,6 @@
     }
     .btn:hover { background: #a80d1e; }
     .btn:disabled { background: #ccc; cursor: not-allowed; }
-    .btn-secondary {
-      background: var(--sa-blue);
-    }
-    .btn-secondary:hover { background: var(--sa-dark-blue); }
     .btn-outline {
       background: transparent;
       border: 2px solid var(--sa-blue);
@@ -123,7 +136,7 @@
     }
     .btn-outline:hover { background: rgba(0,63,135,.08); }
 
-    /* --- House list --- */
+    /* House list */
     .house-item {
       display: flex;
       align-items: center;
@@ -136,135 +149,64 @@
     .house-item:last-child { border-bottom: none; }
     .house-item:active { background: #f0f4f8; }
     .house-num {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      background: var(--sa-blue);
-      color: var(--sa-white);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      font-weight: 700;
-      flex-shrink: 0;
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--sa-blue); color: var(--sa-white);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; flex-shrink: 0;
     }
     .house-num.done { background: #059669; }
     .house-num.avoid { background: var(--sa-red); }
-    .house-details {
-      flex: 1;
-      min-width: 0;
-    }
+    .house-details { flex: 1; min-width: 0; }
     .house-addr {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--sa-dark-gray);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 15px; font-weight: 600; color: var(--sa-dark-gray);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .house-status {
-      font-size: 12px;
-      color: var(--sa-pale-gray);
-      margin-top: 2px;
-    }
-    .house-arrow {
-      color: var(--sa-pale-gray);
-      font-size: 18px;
-      flex-shrink: 0;
-    }
+    .house-status { font-size: 12px; color: var(--sa-pale-gray); margin-top: 2px; }
+    .house-arrow { color: var(--sa-pale-gray); font-size: 18px; flex-shrink: 0; }
 
-    /* --- Toggle buttons --- */
+    /* Toggle buttons */
     .toggle-group {
-      display: flex;
-      gap: 0;
-      border-radius: 8px;
-      overflow: hidden;
+      display: flex; gap: 0; border-radius: 8px; overflow: hidden;
       border: 2px solid #c5c5c5;
     }
     .toggle-btn {
-      flex: 1;
-      padding: 12px;
-      border: none;
-      background: var(--sa-white);
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      color: var(--sa-gray);
+      flex: 1; padding: 12px; border: none; background: var(--sa-white);
+      font-size: 15px; font-weight: 600; cursor: pointer; color: var(--sa-gray);
       transition: background .1s, color .1s;
     }
-    .toggle-btn + .toggle-btn {
-      border-left: 1px solid #c5c5c5;
-    }
-    .toggle-btn.active-yes {
-      background: #059669;
-      color: var(--sa-white);
-    }
-    .toggle-btn.active-no {
-      background: var(--sa-red);
-      color: var(--sa-white);
-    }
+    .toggle-btn + .toggle-btn { border-left: 1px solid #c5c5c5; }
+    .toggle-btn.active-yes { background: #059669; color: var(--sa-white); }
+    .toggle-btn.active-no { background: var(--sa-red); color: var(--sa-white); }
 
-    /* --- Checkbox field --- */
-    .checkbox-field {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 12px 0;
-    }
-    .checkbox-field input[type="checkbox"] {
-      width: 22px;
-      height: 22px;
-      accent-color: var(--sa-red);
-    }
-    .checkbox-field label {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--sa-dark-gray);
-      margin: 0;
-    }
+    /* Checkbox */
+    .checkbox-field { display: flex; align-items: center; gap: 10px; padding: 12px 0; }
+    .checkbox-field input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--sa-red); }
+    .checkbox-field label { font-size: 15px; font-weight: 600; color: var(--sa-dark-gray); margin: 0; }
 
-    /* --- Progress bar --- */
-    .progress-bar {
-      background: #e5e7eb;
-      border-radius: 6px;
-      height: 8px;
-      margin: 12px 0;
-      overflow: hidden;
-    }
-    .progress-fill {
-      height: 100%;
-      background: #059669;
-      border-radius: 6px;
-      transition: width .3s;
-    }
-    .progress-text {
-      font-size: 13px;
-      color: var(--sa-pale-gray);
-      text-align: center;
-    }
+    /* Progress */
+    .progress-bar { background: #e5e7eb; border-radius: 6px; height: 8px; margin: 12px 0; overflow: hidden; }
+    .progress-fill { height: 100%; background: #059669; border-radius: 6px; transition: width .3s; }
+    .progress-text { font-size: 13px; color: var(--sa-pale-gray); text-align: center; }
 
     .screen { display: none; }
     .screen.active { display: block; }
 
-    /* Amount field shown conditionally */
     #donation-amount-wrap { display: none; margin-top: 10px; }
     #donation-amount-wrap.visible { display: block; }
 
     .btn-row { display: flex; gap: 10px; margin-top: 16px; }
     .btn-row .btn { flex: 1; }
 
-    .group-label {
-      font-size: 14px;
-      color: var(--sa-blue);
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
+    .error-msg { color: var(--sa-red); font-size: 14px; margin-top: 8px; font-weight: 600; }
   </style>
 </head>
 <body>
   <header>
     <h1>ScoutMap</h1>
-    <div id="scout-info-badge"></div>
+    <div class="header-right">
+      <div id="scout-info-badge"></div>
+      <button id="logout-btn" onclick="scoutLogout()" style="display:none">Log Out</button>
+    </div>
   </header>
 
   <div class="container">
@@ -273,12 +215,20 @@
       <div class="card">
         <h2>Scout Information</h2>
         <div class="field">
-          <label for="scout-name">Your Name</label>
-          <input id="scout-name" type="text" placeholder="First Last" required autocomplete="name" />
+          <label for="scout-select">Your Name</label>
+          <select id="scout-select">
+            <option value="">Loading roster...</option>
+          </select>
         </div>
-        <div class="field">
-          <label for="scout-id-num">Scout ID Number</label>
-          <input id="scout-id-num" type="text" placeholder="ID Number" autocomplete="off" />
+        <div id="other-name-wrap">
+          <div class="field">
+            <label for="other-name">Enter Your Name</label>
+            <input id="other-name" type="text" placeholder="First Last" autocomplete="name" />
+          </div>
+          <div class="field">
+            <label for="other-id">Scout ID (optional)</label>
+            <input id="other-id" type="text" placeholder="ID Number" autocomplete="off" />
+          </div>
         </div>
       </div>
       <div class="card">
@@ -293,6 +243,7 @@
         </div>
       </div>
       <button id="start-btn" class="btn" disabled>Start Walking</button>
+      <div id="start-error" class="error-msg" style="display:none"></div>
     </div>
 
     <!-- Screen 2: House list -->
@@ -303,7 +254,7 @@
         <div class="progress-text" id="progress-text">0 / 0 visited</div>
         <div id="house-list"></div>
       </div>
-      <button class="btn btn-outline" onclick="showScreen('setup-screen')" style="margin-top:10px;">Change Group</button>
+      <button class="btn btn-outline" onclick="backToSetup()" style="margin-top:10px;">Change Group</button>
     </div>
 
     <!-- Screen 3: House visit form -->

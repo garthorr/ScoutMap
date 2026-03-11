@@ -17,6 +17,9 @@
       <a href="#" onclick="showPage('walk-groups', event)" title="Create walkable scout groups by street">Walk Groups</a>
       <a href="#" onclick="showPage('imports', event)" title="Import public address and appraisal data">Import Data</a>
       <a href="#" onclick="showPage('houses', event)" title="Search and manage the master house list">Houses</a>
+      <a href="#" onclick="showPage('roster', event)" title="Manage scout roster">Roster</a>
+      <a href="#" onclick="showPage('scout-data', event)" title="View data entered by scouts">Scout Data</a>
+      <a href="/scout" target="_blank" title="Open scout field app" style="border:1px solid var(--sa-pale-blue);">Scout App</a>
     </div>
   </nav>
 
@@ -249,6 +252,49 @@
       </div>
       <div id="houses-list" class="card-list"></div>
       <div style="margin-top:12px;"><button class="btn-sm" onclick="exportHousesCSV()">Export Houses CSV</button></div>
+    </section>
+
+    <!-- Roster -->
+    <section id="page-roster" class="page">
+      <h2>Scout Roster</h2>
+      <div class="card">
+        <h3>Add Scout</h3>
+        <form id="roster-form" class="inline-form">
+          <span class="tooltip-wrap">
+            <input name="name" placeholder="Scout name" required />
+            <span class="tooltip">Full name of the scout</span>
+          </span>
+          <span class="tooltip-wrap">
+            <input name="scout_id" placeholder="Scout ID (optional)" />
+            <span class="tooltip">BSA member ID or troop number</span>
+          </span>
+          <button type="submit">Add Scout</button>
+        </form>
+      </div>
+      <div id="roster-list" class="card-list"></div>
+    </section>
+
+    <!-- Scout Data -->
+    <section id="page-scout-data" class="page">
+      <h2>Scout Data</h2>
+      <div class="card">
+        <h3>Filter</h3>
+        <div class="inline-form">
+          <select id="sd-event-filter">
+            <option value="">All Events</option>
+          </select>
+          <button onclick="loadScoutData()">Filter</button>
+          <button class="btn-sm" onclick="exportScoutDataCSV()">Export CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Summary by Scout</h3>
+        <div id="scout-summary"></div>
+      </div>
+      <div class="card">
+        <h3>All Visit Records</h3>
+        <div id="scout-data-list"></div>
+      </div>
     </section>
 
     <!-- Visit Modal -->
