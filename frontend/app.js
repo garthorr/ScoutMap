@@ -158,16 +158,24 @@ document.getElementById("assign-form").onsubmit = async (e) => {
 
 // --- Walk Groups ---
 async function loadWalkGroupEvents() {
-  const r = await fetch(API + "/api/events/");
-  const events = await r.json();
   const sel = document.getElementById("wg-event-select");
-  sel.innerHTML = '<option value="">Select an event…</option>' +
-    events.map(e => {
-      const selected = e.id === currentEventId ? " selected" : "";
-      return `<option value="${e.id}"${selected}>${e.name}</option>`;
-    }).join("");
-  // Load groups if event already selected
-  if (currentEventId) loadWalkGroupList();
+  try {
+    const r = await fetch(API + "/api/events/");
+    if (!r.ok) { sel.innerHTML = '<option value="">Failed to load events</option>'; return; }
+    const events = await r.json();
+    if (!events.length) {
+      sel.innerHTML = '<option value="">No events — create one first</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">Select an event…</option>' +
+      events.map(ev => {
+        const selected = String(ev.id) === String(currentEventId) ? " selected" : "";
+        return `<option value="${ev.id}"${selected}>${ev.name} (${ev.house_count} houses)</option>`;
+      }).join("");
+    if (currentEventId) loadWalkGroupList();
+  } catch (err) {
+    sel.innerHTML = '<option value="">Error loading events</option>';
+  }
 }
 
 document.getElementById("wg-event-select").onchange = (e) => {
