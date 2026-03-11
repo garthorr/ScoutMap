@@ -2,6 +2,23 @@
 const API = "";
 let map, markersLayer, currentEventId, currentEventName;
 
+// --- CSV Export Utility ---
+function exportCSV(filename, headers, rows) {
+  const escape = (v) => {
+    const s = String(v ?? "");
+    return s.includes(",") || s.includes('"') || s.includes("\n")
+      ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const lines = [headers.map(escape).join(",")];
+  rows.forEach(r => lines.push(r.map(escape).join(",")));
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // --- Navigation ---
 function showPage(name, evt) {
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
@@ -82,6 +99,18 @@ async function loadEvents() {
       </tr>`).join("") + `</table>`
     : "<p>No events yet.</p>";
 }
+async function exportEventsCSV() {
+  const r = await fetch(API + "/api/events/");
+  const events = await r.json();
+  if (!events.length) { alert("No events to export."); return; }
+  exportCSV("events.csv",
+    ["Name", "Description", "Date", "Houses"],
+    events.map(e => [
+      e.name, e.description || "", e.event_date || "", e.house_count,
+    ])
+  );
+}
+
 document.getElementById("event-form").onsubmit = async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
@@ -189,6 +218,12 @@ document.getElementById("wg-event-select").onchange = (e) => {
 document.getElementById("walk-group-form").onsubmit = async (e) => {
   e.preventDefault();
   if (!currentEventId) { alert("Select an event first."); return; }
+  // Check if event already has houses assigned — warn before overwriting
+  const existing = await fetch(API + `/api/events/${currentEventId}/houses`);
+  const existingHouses = await existing.json();
+  if (existingHouses.length > 0) {
+    if (!confirm(`This event already has ${existingHouses.length} houses assigned.\n\nGenerating walk groups will reassign group labels for overlapping houses.\n\nContinue?`)) return;
+  }
   const fd = new FormData(e.target);
   const body = {
     zip_code: fd.get("zip_code"),
@@ -260,6 +295,35 @@ async function loadWalkGroupList() {
   }
 }
 
+async function exportWalkGroupsCSV() {
+  if (!currentEventId) { alert("Select an event first."); return; }
+  const r = await fetch(API + `/api/events/${currentEventId}/houses`);
+  const houses = await r.json();
+  if (!houses.length) { alert("No walk groups to export."); return; }
+  exportCSV("walk-groups.csv",
+    ["Group", "Address", "Owner", "ZIP", "Status"],
+    houses.map(eh => [
+      eh.assigned_to || "Unassigned", eh.house.full_address,
+      eh.house.owner_name || "", eh.house.zip_code || "", eh.status,
+    ])
+  );
+}
+
+async function exportEventHousesCSV() {
+  if (!currentEventId) return;
+  const r = await fetch(API + `/api/events/${currentEventId}/houses`);
+  const houses = await r.json();
+  if (!houses.length) { alert("No houses to export."); return; }
+  exportCSV(`event-${currentEventName || "houses"}.csv`,
+    ["Group", "Address", "Owner", "ZIP", "Status", "Latitude", "Longitude"],
+    houses.map(eh => [
+      eh.assigned_to || "Unassigned", eh.house.full_address,
+      eh.house.owner_name || "", eh.house.zip_code || "", eh.status,
+      eh.house.latitude || "", eh.house.longitude || "",
+    ])
+  );
+}
+
 // --- Visits ---
 function openVisitModal(eventId, eventHouseId) {
   document.querySelector('[name="event_id"]').value = eventId;
@@ -296,6 +360,7 @@ function printPacket() { window.print(); }
 // --- ArcGIS Fetch ---
 document.getElementById("arcgis-form").onsubmit = async (e) => {
   e.preventDefault();
+  if (!confirm("This will fetch public data and add/update houses in the database.\n\nExisting house data will not be overwritten, only missing fields will be filled in.\n\nContinue?")) return;
   const fd = new FormData(e.target);
   const zips = fd.get("zip_codes");
   const body = {
@@ -330,6 +395,7 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
 // --- Imports ---
 document.getElementById("import-form").onsubmit = async (e) => {
   e.preventDefault();
+  if (!confirm("This will import addresses and add/update houses in the database.\n\nExisting house data will not be overwritten.\n\nContinue?")) return;
   const fd = new FormData(e.target);
   document.getElementById("import-progress").classList.remove("hidden");
   document.getElementById("import-status").textContent = "uploading…";
@@ -418,6 +484,25 @@ async function loadHouses() {
         <td>${h.manually_created ? "Manual" : "Imported"}</td>
       </tr>`).join("") + `</table>`
     : "<p>No houses found.</p>";
+}
+
+async function exportHousesCSV() {
+  const search = document.getElementById("house-search")?.value || "";
+  const zip = document.getElementById("house-zip")?.value || "";
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  if (zip) params.set("zip_code", zip);
+  const r = await fetch(API + "/api/houses/?" + params);
+  const houses = await r.json();
+  if (!houses.length) { alert("No houses to export."); return; }
+  exportCSV("houses.csv",
+    ["Address", "City", "ZIP", "Owner", "Appraised Value", "Latitude", "Longitude", "Source"],
+    houses.map(h => [
+      h.full_address, h.city || "", h.zip_code || "", h.owner_name || "",
+      h.total_appraised_value || "", h.latitude || "", h.longitude || "",
+      h.manually_created ? "Manual" : "Imported",
+    ])
+  );
 }
 
 document.getElementById("manual-house-form").onsubmit = async (e) => {

@@ -55,6 +55,7 @@
         </form>
       </div>
       <div id="events-list" class="card-list"></div>
+      <div style="margin-top:12px;"><button class="btn-sm" onclick="exportEventsCSV()">Export Events CSV</button></div>
     </section>
 
     <!-- Event Detail (hidden, shown dynamically) -->
@@ -86,6 +87,7 @@
         <h3>Assigned Houses</h3>
         <div id="event-houses-list"></div>
         <button id="btn-print-packet" onclick="printPacket()" title="Print a walk packet for assigned houses">Print Packet</button>
+        <button class="btn-sm" onclick="exportEventHousesCSV()" title="Export assigned houses to CSV">Export CSV</button>
       </div>
     </section>
 
@@ -121,6 +123,7 @@
       <div class="card">
         <h3>Generated Groups</h3>
         <div id="wg-groups-list"><p>Select an event and generate groups above.</p></div>
+        <div style="margin-top:12px;"><button class="btn-sm" onclick="exportWalkGroupsCSV()">Export Walk Groups CSV</button></div>
       </div>
     </section>
 
@@ -245,6 +248,7 @@
         </form>
       </div>
       <div id="houses-list" class="card-list"></div>
+      <div style="margin-top:12px;"><button class="btn-sm" onclick="exportHousesCSV()">Export Houses CSV</button></div>
     </section>
 
     <!-- Visit Modal -->
