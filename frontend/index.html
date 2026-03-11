@@ -337,7 +337,13 @@ Alex Johnson,</pre>
           <label>Tickets Purchased <input name="tickets_purchased" type="number" value="0" /></label>
           <label>Notes <textarea name="notes"></textarea></label>
           <label><input name="follow_up" type="checkbox" /> Follow-up needed</label>
-          <label>Volunteer <input name="volunteer_name" /></label>
+          <label>Volunteer
+            <select name="volunteer_select" id="visit-volunteer-select">
+              <option value="">Select volunteer...</option>
+              <option value="__other__">Other (write in)</option>
+            </select>
+          </label>
+          <label id="visit-volunteer-other-wrap" style="display:none">Volunteer Name <input name="volunteer_name" /></label>
           <button type="submit">Save Visit</button>
         </form>
       </div>

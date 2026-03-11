@@ -327,9 +327,34 @@ async function exportEventHousesCSV() {
 }
 
 // --- Visits ---
-function openVisitModal(eventId, eventHouseId) {
+let _visitRosterLoaded = false;
+async function loadVisitRoster() {
+  const sel = document.getElementById("visit-volunteer-select");
+  try {
+    const r = await fetch(API + "/api/scout/roster?active_only=true");
+    const roster = await r.json();
+    sel.innerHTML = '<option value="">Select volunteer...</option>' +
+      roster.map(s => `<option value="${s.name}">${s.name}${s.scout_id ? " (" + s.scout_id + ")" : ""}</option>`).join("") +
+      '<option value="__other__">Other (write in)</option>';
+  } catch {
+    sel.innerHTML = '<option value="">Select volunteer...</option><option value="__other__">Other (write in)</option>';
+  }
+  _visitRosterLoaded = true;
+}
+document.getElementById("visit-volunteer-select").onchange = (e) => {
+  document.getElementById("visit-volunteer-other-wrap").style.display =
+    e.target.value === "__other__" ? "" : "none";
+  if (e.target.value !== "__other__") {
+    document.querySelector('#visit-form [name="volunteer_name"]').value = "";
+  }
+};
+async function openVisitModal(eventId, eventHouseId) {
   document.querySelector('[name="event_id"]').value = eventId;
   document.querySelector('[name="event_house_id"]').value = eventHouseId;
+  document.getElementById("visit-volunteer-select").value = "";
+  document.getElementById("visit-volunteer-other-wrap").style.display = "none";
+  document.querySelector('#visit-form [name="volunteer_name"]').value = "";
+  if (!_visitRosterLoaded) await loadVisitRoster();
   document.getElementById("visit-modal").classList.remove("hidden");
 }
 function closeVisitModal() {
@@ -340,13 +365,17 @@ document.getElementById("visit-form").onsubmit = async (e) => {
   const fd = new FormData(e.target);
   const eventId = fd.get("event_id");
   const ehId = fd.get("event_house_id");
+  const volSelect = fd.get("volunteer_select");
+  const volunteerName = volSelect === "__other__"
+    ? (fd.get("volunteer_name") || null)
+    : (volSelect || null);
   const body = {
     outcome: fd.get("outcome"),
     donation_amount: fd.get("donation_amount") ? parseFloat(fd.get("donation_amount")) : null,
     tickets_purchased: parseInt(fd.get("tickets_purchased") || "0"),
     notes: fd.get("notes") || null,
     follow_up: !!fd.get("follow_up"),
-    volunteer_name: fd.get("volunteer_name") || null,
+    volunteer_name: volunteerName,
   };
   await fetch(API + `/api/events/${eventId}/houses/${ehId}/visits`, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -550,15 +579,18 @@ document.getElementById("roster-form").onsubmit = async (e) => {
   });
   e.target.reset();
   loadRoster();
+  _visitRosterLoaded = false;
 };
 async function toggleRosterScout(id) {
   await fetch(API + "/api/scout/roster/" + id, { method: "PATCH" });
   loadRoster();
+  _visitRosterLoaded = false;
 }
 async function deleteRosterScout(id) {
   if (!confirm("Remove this scout from the roster?")) return;
   await fetch(API + "/api/scout/roster/" + id, { method: "DELETE" });
   loadRoster();
+  _visitRosterLoaded = false;
 }
 
 async function exportRosterCSV() {
@@ -584,6 +616,7 @@ document.getElementById("roster-import-form").onsubmit = async (e) => {
       statusEl.textContent = `Done! ${data.added} scout(s) added, ${data.skipped} skipped (duplicates or empty).`;
       e.target.reset();
       loadRoster();
+      _visitRosterLoaded = false;
     } else {
       statusEl.textContent = "Error: " + (data.detail || JSON.stringify(data));
     }
