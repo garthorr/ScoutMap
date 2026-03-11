@@ -221,31 +221,43 @@ document.getElementById("walk-group-form").onsubmit = async (e) => {
 
 async function loadWalkGroupList() {
   if (!currentEventId) return;
-  const r = await fetch(API + `/api/events/${currentEventId}/houses`);
-  const houses = await r.json();
   const el = document.getElementById("wg-groups-list");
-  if (!houses.length) { el.innerHTML = "<p>No groups yet. Generate walk groups above.</p>"; return; }
+  el.innerHTML = '<p class="loading-text">Loading groups…</p>';
+  try {
+    const r = await fetch(API + `/api/events/${currentEventId}/houses`);
+    if (!r.ok) {
+      el.innerHTML = `<p>Failed to load groups (HTTP ${r.status}).</p>`;
+      return;
+    }
+    const houses = await r.json();
+    if (!Array.isArray(houses) || !houses.length) {
+      el.innerHTML = "<p>No groups yet. Generate walk groups above.</p>";
+      return;
+    }
 
-  const groups = {};
-  houses.forEach(eh => {
-    const key = eh.assigned_to || "Unassigned";
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(eh);
-  });
+    const groups = {};
+    houses.forEach(eh => {
+      const key = eh.assigned_to || "Unassigned";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(eh);
+    });
 
-  let html = "";
-  for (const [label, items] of Object.entries(groups)) {
-    const visited = items.filter(eh => eh.status === "visited").length;
-    html += `<details><summary><strong>${label}</strong> — ${items.length} houses, ${visited} visited</summary>`;
-    html += `<table><tr><th>#</th><th>Address</th><th>Owner</th></tr>`;
-    html += items.map((eh, idx) => `<tr>
-      <td>${idx + 1}</td>
-      <td>${eh.house.full_address}</td>
-      <td>${eh.house.owner_name || "—"}</td>
-    </tr>`).join("");
-    html += `</table></details>`;
+    let html = "";
+    for (const [label, items] of Object.entries(groups)) {
+      const visited = items.filter(eh => eh.status === "visited").length;
+      html += `<details><summary><strong>${label}</strong> — ${items.length} houses, ${visited} visited</summary>`;
+      html += `<table><tr><th>#</th><th>Address</th><th>Owner</th></tr>`;
+      html += items.map((eh, idx) => `<tr>
+        <td>${idx + 1}</td>
+        <td>${eh.house.full_address}</td>
+        <td>${eh.house.owner_name || "—"}</td>
+      </tr>`).join("");
+      html += `</table></details>`;
+    }
+    el.innerHTML = html;
+  } catch (err) {
+    el.innerHTML = `<p>Error loading groups: ${err.message}</p>`;
   }
-  el.innerHTML = html;
 }
 
 // --- Visits ---
