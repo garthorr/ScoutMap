@@ -38,20 +38,86 @@ function showPage(name, evt) {
 }
 
 // --- Dashboard ---
+const TILE_PAGE_MAP = {
+  Houses: "houses",
+  Events: "events",
+  Visits: "scout-data",
+  Donations: "scout-data",
+  Unmatched: "imports",
+  Imports: "imports",
+  Scouts: "roster",
+};
+
+function _savedTileOrder() {
+  try { return JSON.parse(localStorage.getItem("tile_order")); } catch { return null; }
+}
+
 async function loadDashboard() {
   const r = await fetch(API + "/api/stats/");
   const s = await r.json();
-  document.getElementById("stats-grid").innerHTML = [
-    stat("Houses", s.total_houses),
-    stat("Events", s.total_events),
-    stat("Visits", s.total_visits),
-    stat("Donations", "$" + (s.total_donations || 0).toLocaleString()),
-    stat("Unmatched", s.unmatched_count),
-    stat("Imports", s.import_count),
-  ].join("");
+  const tiles = [
+    { key: "Houses",    value: s.total_houses },
+    { key: "Events",    value: s.total_events },
+    { key: "Visits",    value: s.total_visits },
+    { key: "Donations", value: "$" + (s.total_donations || 0).toLocaleString() },
+    { key: "Scouts",    value: s.total_scouts ?? 0 },
+    { key: "Unmatched", value: s.unmatched_count },
+    { key: "Imports",   value: s.import_count },
+  ];
+
+  // Apply saved order
+  const order = _savedTileOrder();
+  if (order) {
+    tiles.sort((a, b) => {
+      const ai = order.indexOf(a.key), bi = order.indexOf(b.key);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+  }
+
+  const grid = document.getElementById("stats-grid");
+  grid.innerHTML = tiles.map(t => stat(t.key, t.value)).join("");
+  _initTileDrag(grid);
 }
+
 function stat(label, value) {
-  return `<div class="stat-card"><div class="value">${value}</div><div class="label">${label}</div></div>`;
+  const page = TILE_PAGE_MAP[label] || "dashboard";
+  return `<div class="stat-card" draggable="true" data-tile="${label}" onclick="showPage('${page}')" style="cursor:pointer;">`
+    + `<div class="value">${value}</div><div class="label">${label}</div></div>`;
+}
+
+function _initTileDrag(grid) {
+  let dragged = null;
+  grid.querySelectorAll(".stat-card").forEach(card => {
+    card.addEventListener("dragstart", (e) => {
+      dragged = card;
+      card.style.opacity = "0.4";
+      e.dataTransfer.effectAllowed = "move";
+    });
+    card.addEventListener("dragend", () => {
+      card.style.opacity = "";
+      dragged = null;
+      grid.querySelectorAll(".stat-card").forEach(c => c.classList.remove("drag-over"));
+    });
+    card.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      card.classList.add("drag-over");
+    });
+    card.addEventListener("dragleave", () => card.classList.remove("drag-over"));
+    card.addEventListener("drop", (e) => {
+      e.preventDefault();
+      card.classList.remove("drag-over");
+      if (!dragged || dragged === card) return;
+      const cards = [...grid.querySelectorAll(".stat-card")];
+      const fromIdx = cards.indexOf(dragged);
+      const toIdx = cards.indexOf(card);
+      if (fromIdx < toIdx) card.after(dragged);
+      else card.before(dragged);
+      // Save order
+      const order = [...grid.querySelectorAll(".stat-card")].map(c => c.dataset.tile);
+      localStorage.setItem("tile_order", JSON.stringify(order));
+    });
+  });
 }
 
 // --- Map ---
@@ -160,7 +226,7 @@ async function loadEventHouses() {
       <td>${eh.house.full_address}</td>
       <td>${eh.house.owner_name || "—"}</td>
       <td><span class="badge badge-${eh.status}">${eh.status}</span></td>
-      <td><button class="btn-sm" onclick="openVisitModal('${currentEventId}','${eh.id}')">Visit</button></td>
+      <td><button class="btn-sm" onclick="openVisitModal('${currentEventId}','${eh.id}','${eh.house.full_address.replace(/'/g, "\\'")}')">Visit</button></td>
     </tr>`).join("");
     html += `</table></details>`;
   }
@@ -283,11 +349,13 @@ async function loadWalkGroupList() {
     for (const [label, items] of Object.entries(groups)) {
       const visited = items.filter(eh => eh.status === "visited").length;
       html += `<details><summary><strong>${label}</strong> — ${items.length} houses, ${visited} visited</summary>`;
-      html += `<table><tr><th>#</th><th>Address</th><th>Owner</th></tr>`;
+      html += `<table><tr><th>#</th><th>Address</th><th>Owner</th><th>Status</th><th></th></tr>`;
       html += items.map((eh, idx) => `<tr>
         <td>${idx + 1}</td>
         <td>${eh.house.full_address}</td>
         <td>${eh.house.owner_name || "—"}</td>
+        <td><span class="badge badge-${eh.status}">${eh.status}</span></td>
+        <td><button class="btn-sm" onclick="openVisitModal('${currentEventId}','${eh.id}','${eh.house.full_address.replace(/'/g, "\\'")}')">Visit</button></td>
       </tr>`).join("");
       html += `</table></details>`;
     }
@@ -348,12 +416,19 @@ document.getElementById("visit-volunteer-select").onchange = (e) => {
     document.querySelector('#visit-form [name="volunteer_name"]').value = "";
   }
 };
-async function openVisitModal(eventId, eventHouseId) {
-  document.querySelector('[name="event_id"]').value = eventId;
-  document.querySelector('[name="event_house_id"]').value = eventHouseId;
-  document.getElementById("visit-volunteer-select").value = "";
+document.getElementById("visit-donation-select").onchange = (e) => {
+  document.getElementById("visit-donation-amount-wrap").style.display =
+    e.target.value === "true" ? "" : "none";
+};
+async function openVisitModal(eventId, eventHouseId, address) {
+  const form = document.getElementById("visit-form");
+  form.reset();
+  form.querySelector('[name="event_id"]').value = eventId;
+  form.querySelector('[name="event_house_id"]').value = eventHouseId;
+  document.getElementById("visit-modal-title").textContent =
+    address ? "Record Visit — " + address : "Record Visit";
   document.getElementById("visit-volunteer-other-wrap").style.display = "none";
-  document.querySelector('#visit-form [name="volunteer_name"]').value = "";
+  document.getElementById("visit-donation-amount-wrap").style.display = "none";
   if (!_visitRosterLoaded) await loadVisitRoster();
   document.getElementById("visit-modal").classList.remove("hidden");
 }
@@ -369,20 +444,29 @@ document.getElementById("visit-form").onsubmit = async (e) => {
   const volunteerName = volSelect === "__other__"
     ? (fd.get("volunteer_name") || null)
     : (volSelect || null);
+
+  const toBool = (v) => v === "true" ? true : v === "false" ? false : null;
+
   const body = {
-    outcome: fd.get("outcome"),
+    outcome: fd.get("outcome") || null,
     donation_amount: fd.get("donation_amount") ? parseFloat(fd.get("donation_amount")) : null,
     tickets_purchased: parseInt(fd.get("tickets_purchased") || "0"),
     notes: fd.get("notes") || null,
     follow_up: !!fd.get("follow_up"),
     volunteer_name: volunteerName,
+    door_answer: toBool(fd.get("door_answer")),
+    donation_given: toBool(fd.get("donation_given")),
+    former_scout: toBool(fd.get("former_scout")),
+    avoid_house: !!fd.get("avoid_house"),
   };
   await fetch(API + `/api/events/${eventId}/houses/${ehId}/visits`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   closeVisitModal();
-  loadEventHouses();
+  // Refresh whichever list is active
+  if (document.getElementById("page-event-detail").classList.contains("active")) loadEventHouses();
+  if (document.getElementById("page-walk-groups").classList.contains("active")) loadWalkGroupList();
 };
 
 // --- Print packet ---

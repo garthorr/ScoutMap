@@ -126,7 +126,9 @@
       <div class="card">
         <h3>Generated Groups</h3>
         <div id="wg-groups-list"><p>Select an event and generate groups above.</p></div>
-        <div style="margin-top:12px;"><button class="btn-sm" onclick="exportWalkGroupsCSV()">Export Walk Groups CSV</button></div>
+        <div style="margin-top:12px;">
+          <button class="btn-sm" onclick="exportWalkGroupsCSV()">Export Walk Groups CSV</button>
+        </div>
       </div>
     </section>
 
@@ -318,14 +320,43 @@ Alex Johnson,</pre>
 
     <!-- Visit Modal -->
     <div id="visit-modal" class="modal hidden">
-      <div class="modal-content">
+      <div class="modal-content" style="width:460px;">
         <span class="close" onclick="closeVisitModal()">&times;</span>
-        <h3>Record Visit</h3>
+        <h3 id="visit-modal-title">Record Visit</h3>
         <form id="visit-form">
           <input type="hidden" name="event_house_id" />
           <input type="hidden" name="event_id" />
+
+          <label>Door Answer
+            <select name="door_answer">
+              <option value="">—</option>
+              <option value="true">Yes — someone answered</option>
+              <option value="false">No answer</option>
+            </select>
+          </label>
+
+          <label>Donation
+            <select name="donation_given" id="visit-donation-select">
+              <option value="">—</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          </label>
+          <label id="visit-donation-amount-wrap" style="display:none">Donation Amount <input name="donation_amount" type="number" step="0.01" min="0" /></label>
+
+          <label>Former Scout
+            <select name="former_scout">
+              <option value="">—</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          </label>
+
+          <label><input name="avoid_house" type="checkbox" /> Avoid this house in future</label>
+
           <label>Outcome
-            <select name="outcome" required>
+            <select name="outcome">
+              <option value="">—</option>
               <option value="donated">Donated</option>
               <option value="pledged">Pledged</option>
               <option value="not_home">Not Home</option>
@@ -333,10 +364,10 @@ Alex Johnson,</pre>
               <option value="other">Other</option>
             </select>
           </label>
-          <label>Donation Amount <input name="donation_amount" type="number" step="0.01" /></label>
-          <label>Tickets Purchased <input name="tickets_purchased" type="number" value="0" /></label>
+          <label>Tickets Purchased <input name="tickets_purchased" type="number" value="0" min="0" /></label>
           <label>Notes <textarea name="notes"></textarea></label>
           <label><input name="follow_up" type="checkbox" /> Follow-up needed</label>
+
           <label>Volunteer
             <select name="volunteer_select" id="visit-volunteer-select">
               <option value="">Select volunteer...</option>

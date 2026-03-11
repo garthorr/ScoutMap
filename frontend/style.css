@@ -141,6 +141,14 @@ h3 {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0,0,0,.12);
 }
+.stat-card.drag-over {
+  outline: 2px dashed var(--sa-blue);
+  outline-offset: -2px;
+  background: linear-gradient(135deg, #e8f0fe 0%, var(--sa-white) 100%);
+}
+.stat-card[draggable="true"] {
+  touch-action: none;
+}
 .stat-card .value {
   font-size: 32px;
   font-weight: 800;
