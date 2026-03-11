@@ -188,3 +188,16 @@ class UnmatchedRecord(Base):
     status = Column(String(20), default="pending")          # pending / resolved / ignored
     resolved_house_id = Column(UUID(as_uuid=True), ForeignKey("master_houses.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Scout roster – managed by admin, used in scout app dropdown
+# ---------------------------------------------------------------------------
+class ScoutRoster(Base):
+    __tablename__ = "scout_roster"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(200), nullable=False)
+    scout_id = Column(String(100))
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

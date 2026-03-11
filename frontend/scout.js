@@ -6,6 +6,8 @@ let selectedGroupLabel = "";
 let houses = [];
 let currentHouseIdx = -1;
 let formState = { door: null, donation: null, former: null };
+let rosterData = [];
+let eventsData = [];
 
 // --- Screen management ---
 function showScreen(id) {
@@ -13,45 +15,131 @@ function showScreen(id) {
   document.getElementById(id).classList.add("active");
 }
 
-// --- Restore saved scout info ---
+// --- Restore saved scout selection ---
 function restoreScoutInfo() {
   const saved = localStorage.getItem("scoutmap_scout");
   if (saved) {
     try {
       const data = JSON.parse(saved);
-      document.getElementById("scout-name").value = data.name || "";
-      document.getElementById("scout-id-num").value = data.id || "";
+      scoutName = data.name || "";
+      scoutIdNum = data.id || "";
+      // Selection restored after roster loads
     } catch {}  // eslint-disable-line no-empty
   }
+  updateBadge();
+}
+
+function updateBadge() {
+  const badge = document.getElementById("scout-info-badge");
+  const logoutBtn = document.getElementById("logout-btn");
+  badge.textContent = scoutName || "";
+  logoutBtn.style.display = scoutName ? "" : "none";
 }
 
 function saveScoutInfo() {
-  scoutName = document.getElementById("scout-name").value.trim();
-  scoutIdNum = document.getElementById("scout-id-num").value.trim();
-  localStorage.setItem("scoutmap_scout", JSON.stringify({ name: scoutName, id: scoutIdNum }));
-  const badge = document.getElementById("scout-info-badge");
-  badge.textContent = scoutName || "";
+  const sel = document.getElementById("scout-select");
+  const val = sel.value;
+
+  if (val === "__other__") {
+    scoutName = document.getElementById("other-name").value.trim();
+    scoutIdNum = document.getElementById("other-id").value.trim();
+  } else if (val) {
+    const scout = rosterData.find(s => s.id === val);
+    if (scout) {
+      scoutName = scout.name;
+      scoutIdNum = scout.scout_id || "";
+    }
+  }
+
+  localStorage.setItem("scoutmap_scout", JSON.stringify({ name: scoutName, id: scoutIdNum, roster_id: val }));
+  updateBadge();
 }
+
+// --- Logout ---
+function scoutLogout() {
+  localStorage.removeItem("scoutmap_scout");
+  scoutName = "";
+  scoutIdNum = "";
+  selectedEventId = "";
+  selectedGroupLabel = "";
+  houses = [];
+  document.getElementById("scout-select").value = "";
+  document.getElementById("other-name-wrap").classList.remove("visible");
+  document.getElementById("other-name").value = "";
+  document.getElementById("other-id").value = "";
+  document.getElementById("event-select").value = "";
+  document.getElementById("group-select").innerHTML = '<option value="">Select event first</option>';
+  updateBadge();
+  checkReady();
+  showScreen("setup-screen");
+}
+
+function backToSetup() {
+  showScreen("setup-screen");
+}
+
+// --- Load roster for dropdown ---
+async function loadRoster() {
+  const sel = document.getElementById("scout-select");
+  try {
+    const r = await fetch(API + "/api/scout/roster?active_only=true");
+    rosterData = await r.json();
+  } catch {
+    rosterData = [];
+  }
+
+  sel.innerHTML = '<option value="">Select your name...</option>' +
+    rosterData.map(s => `<option value="${s.id}">${s.name}${s.scout_id ? " (" + s.scout_id + ")" : ""}</option>`).join("") +
+    '<option value="__other__">Other (write in)</option>';
+
+  // Restore previous selection
+  const saved = localStorage.getItem("scoutmap_scout");
+  if (saved) {
+    try {
+      const data = JSON.parse(saved);
+      if (data.roster_id && data.roster_id !== "__other__") {
+        sel.value = data.roster_id;
+      } else if (data.name) {
+        sel.value = "__other__";
+        document.getElementById("other-name-wrap").classList.add("visible");
+        document.getElementById("other-name").value = data.name || "";
+        document.getElementById("other-id").value = data.id || "";
+      }
+    } catch {}  // eslint-disable-line no-empty
+  }
+  checkReady();
+}
+
+// Handle scout dropdown change
+document.getElementById("scout-select").onchange = (e) => {
+  const wrap = document.getElementById("other-name-wrap");
+  if (e.target.value === "__other__") {
+    wrap.classList.add("visible");
+  } else {
+    wrap.classList.remove("visible");
+  }
+  checkReady();
+};
+document.getElementById("other-name").oninput = checkReady;
 
 // --- Load events and groups ---
 async function loadEvents() {
   const sel = document.getElementById("event-select");
   try {
     const r = await fetch(API + "/api/scout/events");
-    const events = await r.json();
-    if (!events.length) {
+    eventsData = await r.json();
+    if (!eventsData.length) {
       sel.innerHTML = '<option value="">No events available</option>';
       return;
     }
     sel.innerHTML = '<option value="">Select an event...</option>' +
-      events.map(ev => `<option value="${ev.id}" data-groups='${JSON.stringify(ev.groups)}'>${ev.name}</option>`).join("");
+      eventsData.map(ev => `<option value="${ev.id}">${ev.name}</option>`).join("");
   } catch {
     sel.innerHTML = '<option value="">Failed to load</option>';
   }
 }
 
 document.getElementById("event-select").onchange = (e) => {
-  const opt = e.target.options[e.target.selectedIndex];
   selectedEventId = e.target.value;
   const groupSel = document.getElementById("group-select");
 
@@ -61,7 +149,8 @@ document.getElementById("event-select").onchange = (e) => {
     return;
   }
 
-  const groups = JSON.parse(opt.dataset.groups || "[]");
+  const ev = eventsData.find(ev => ev.id === selectedEventId);
+  const groups = ev ? ev.groups : [];
   if (!groups.length) {
     groupSel.innerHTML = '<option value="">No walk groups</option>';
   } else {
@@ -77,24 +166,66 @@ document.getElementById("group-select").onchange = () => {
 };
 
 function checkReady() {
-  const name = document.getElementById("scout-name").value.trim();
+  const sel = document.getElementById("scout-select").value;
+  let nameOk = false;
+  if (sel === "__other__") {
+    nameOk = !!document.getElementById("other-name").value.trim();
+  } else {
+    nameOk = !!sel;
+  }
   const group = document.getElementById("group-select").value;
-  document.getElementById("start-btn").disabled = !(name && group);
+  document.getElementById("start-btn").disabled = !(nameOk && group);
+  document.getElementById("start-error").style.display = "none";
 }
-document.getElementById("scout-name").oninput = checkReady;
-document.getElementById("scout-id-num").oninput = checkReady;
 
 // --- Start walking ---
 document.getElementById("start-btn").onclick = async () => {
   saveScoutInfo();
   selectedGroupLabel = document.getElementById("group-select").value;
+  const errEl = document.getElementById("start-error");
+  const btn = document.getElementById("start-btn");
 
-  const r = await fetch(API + `/api/scout/events/${selectedEventId}/groups/${encodeURIComponent(selectedGroupLabel)}/houses`);
-  houses = await r.json();
+  if (!scoutName) {
+    errEl.textContent = "Please enter your name.";
+    errEl.style.display = "block";
+    return;
+  }
+  if (!selectedEventId || !selectedGroupLabel) {
+    errEl.textContent = "Please select an event and walk group.";
+    errEl.style.display = "block";
+    return;
+  }
 
-  document.getElementById("group-title").textContent = selectedGroupLabel;
-  renderHouseList();
-  showScreen("house-list-screen");
+  btn.disabled = true;
+  btn.textContent = "Loading...";
+  errEl.style.display = "none";
+
+  try {
+    const params = new URLSearchParams({ group: selectedGroupLabel });
+    const r = await fetch(API + `/api/scout/events/${selectedEventId}/houses?${params}`);
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      throw new Error(data.detail || `Server error (${r.status})`);
+    }
+    houses = await r.json();
+    if (!houses.length) {
+      errEl.textContent = "No houses found in this group.";
+      errEl.style.display = "block";
+      btn.disabled = false;
+      btn.textContent = "Start Walking";
+      return;
+    }
+
+    document.getElementById("group-title").textContent = selectedGroupLabel;
+    renderHouseList();
+    showScreen("house-list-screen");
+  } catch (err) {
+    errEl.textContent = "Error: " + err.message;
+    errEl.style.display = "block";
+  }
+
+  btn.disabled = false;
+  btn.textContent = "Start Walking";
 };
 
 // --- Render house list ---
@@ -133,14 +264,12 @@ function openHouseForm(idx) {
   const h = houses[idx];
   document.getElementById("form-house-addr").textContent = h.address;
 
-  // Reset form state
   formState = { door: null, donation: null, former: null };
   document.getElementById("donation-amount").value = "";
   document.getElementById("avoid-house").checked = false;
   document.getElementById("visit-notes").value = "";
   document.getElementById("donation-amount-wrap").classList.remove("visible");
 
-  // Pre-fill if previously visited
   if (h.last_visit) {
     if (h.last_visit.door_answer != null) setToggle("door", h.last_visit.door_answer);
     if (h.last_visit.donation_given != null) setToggle("donation", h.last_visit.donation_given);
@@ -150,9 +279,7 @@ function openHouseForm(idx) {
     if (h.last_visit.notes) document.getElementById("visit-notes").value = h.last_visit.notes;
   }
 
-  // Clear toggle visuals for untouched fields
   resetToggleUI();
-
   showScreen("house-form-screen");
 }
 
@@ -172,7 +299,6 @@ function resetToggleUI() {
 function setToggle(key, val) {
   formState[key] = val;
   highlightToggle(key, val);
-
   if (key === "donation") {
     document.getElementById("donation-amount-wrap").classList.toggle("visible", val === true);
     if (!val) document.getElementById("donation-amount").value = "";
@@ -220,7 +346,6 @@ async function saveVisit() {
       body: JSON.stringify(body),
     });
     if (r.ok) {
-      // Update local state
       h.visited = true;
       h.status = "visited";
       h.last_visit = {
@@ -246,4 +371,5 @@ async function saveVisit() {
 
 // --- Init ---
 restoreScoutInfo();
+loadRoster();
 loadEvents();

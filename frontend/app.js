@@ -33,6 +33,8 @@ function showPage(name, evt) {
   if (name === "imports") { loadImports(); loadUnmatched(); }
   if (name === "houses") loadHouses();
   if (name === "walk-groups") loadWalkGroupEvents();
+  if (name === "roster") loadRoster();
+  if (name === "scout-data") { loadScoutDataEvents(); loadScoutData(); }
 }
 
 // --- Dashboard ---
@@ -521,6 +523,121 @@ document.getElementById("manual-house-form").onsubmit = async (e) => {
   if (r.ok) { e.target.reset(); loadHouses(); }
   else { const d = await r.json(); alert(d.detail || "Error"); }
 };
+
+// --- Roster ---
+async function loadRoster() {
+  const r = await fetch(API + "/api/scout/roster");
+  const roster = await r.json();
+  document.getElementById("roster-list").innerHTML = roster.length
+    ? `<table><tr><th>Name</th><th>Scout ID</th><th>Status</th><th></th></tr>` +
+      roster.map(s => `<tr>
+        <td>${s.name}</td>
+        <td>${s.scout_id || "—"}</td>
+        <td><span class="badge badge-${s.active ? "completed" : "pending"}">${s.active ? "Active" : "Inactive"}</span></td>
+        <td>
+          <button class="btn-sm" onclick="toggleRosterScout('${s.id}')">${s.active ? "Deactivate" : "Activate"}</button>
+          <button class="btn-sm btn-danger" onclick="deleteRosterScout('${s.id}')">Delete</button>
+        </td>
+      </tr>`).join("") + `</table>`
+    : "<p>No scouts in roster. Add scouts above.</p>";
+}
+document.getElementById("roster-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  await fetch(API + "/api/scout/roster", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: fd.get("name"), scout_id: fd.get("scout_id") || null }),
+  });
+  e.target.reset();
+  loadRoster();
+};
+async function toggleRosterScout(id) {
+  await fetch(API + "/api/scout/roster/" + id, { method: "PATCH" });
+  loadRoster();
+}
+async function deleteRosterScout(id) {
+  if (!confirm("Remove this scout from the roster?")) return;
+  await fetch(API + "/api/scout/roster/" + id, { method: "DELETE" });
+  loadRoster();
+}
+
+// --- Scout Data ---
+async function loadScoutDataEvents() {
+  const sel = document.getElementById("sd-event-filter");
+  const r = await fetch(API + "/api/events/");
+  const events = await r.json();
+  sel.innerHTML = '<option value="">All Events</option>' +
+    events.map(e => `<option value="${e.id}">${e.name}</option>`).join("");
+}
+
+let _scoutDataCache = [];
+async function loadScoutData() {
+  const eventId = document.getElementById("sd-event-filter").value;
+  const params = eventId ? "?event_id=" + eventId : "";
+
+  const [dataR, summaryR] = await Promise.all([
+    fetch(API + "/api/scout/data" + params),
+    fetch(API + "/api/scout/data/summary" + params),
+  ]);
+  const data = await dataR.json();
+  const summary = await summaryR.json();
+  _scoutDataCache = data;
+
+  // Summary table
+  const sumEl = document.getElementById("scout-summary");
+  if (summary.scouts.length) {
+    sumEl.innerHTML =
+      `<p style="margin-bottom:8px"><strong>${summary.total_visits}</strong> total visits &middot; <strong>$${summary.total_donations.toLocaleString()}</strong> donated</p>` +
+      `<table><tr><th>Scout</th><th>ID</th><th>Visits</th><th>Doors</th><th>Donations</th><th>$ Total</th><th>Former</th><th>Avoid</th></tr>` +
+      summary.scouts.map(s => `<tr>
+        <td>${s.scout_name}</td>
+        <td>${s.scout_id || "—"}</td>
+        <td>${s.total_visits}</td>
+        <td>${s.doors_answered}</td>
+        <td>${s.donations}</td>
+        <td>$${s.donation_total.toLocaleString()}</td>
+        <td>${s.former_scouts}</td>
+        <td>${s.avoid_houses}</td>
+      </tr>`).join("") + `</table>`;
+  } else {
+    sumEl.innerHTML = "<p>No scout data yet.</p>";
+  }
+
+  // Detail table
+  const listEl = document.getElementById("scout-data-list");
+  if (data.length) {
+    listEl.innerHTML = `<table><tr><th>Time</th><th>Scout</th><th>Address</th><th>Group</th><th>Door</th><th>Donation</th><th>Amount</th><th>Former</th><th>Avoid</th><th>Notes</th></tr>` +
+      data.map(v => `<tr>
+        <td>${v.visited_at ? new Date(v.visited_at).toLocaleString() : "—"}</td>
+        <td>${v.scout_name}</td>
+        <td>${v.address}</td>
+        <td>${v.group_label || "—"}</td>
+        <td>${v.door_answer == null ? "—" : v.door_answer ? "Yes" : "No"}</td>
+        <td>${v.donation_given == null ? "—" : v.donation_given ? "Yes" : "No"}</td>
+        <td>${v.donation_amount ? "$" + v.donation_amount : "—"}</td>
+        <td>${v.former_scout == null ? "—" : v.former_scout ? "Yes" : "No"}</td>
+        <td>${v.avoid_house ? "YES" : "—"}</td>
+        <td>${v.notes || ""}</td>
+      </tr>`).join("") + `</table>`;
+  } else {
+    listEl.innerHTML = "<p>No visit data yet. Scouts record data at <a href='/scout' target='_blank'>/scout</a>.</p>";
+  }
+}
+
+function exportScoutDataCSV() {
+  if (!_scoutDataCache.length) { alert("No data to export."); return; }
+  exportCSV("scout-data.csv",
+    ["Time", "Scout", "Scout ID", "Event", "Group", "Address", "ZIP", "Door Answer", "Donation", "Amount", "Former Scout", "Avoid House", "Notes"],
+    _scoutDataCache.map(v => [
+      v.visited_at || "", v.scout_name || "", v.scout_id || "", v.event_name || "",
+      v.group_label || "", v.address || "", v.zip_code || "",
+      v.door_answer == null ? "" : v.door_answer ? "Yes" : "No",
+      v.donation_given == null ? "" : v.donation_given ? "Yes" : "No",
+      v.donation_amount || "", v.former_scout == null ? "" : v.former_scout ? "Yes" : "No",
+      v.avoid_house ? "Yes" : "No", v.notes || "",
+    ])
+  );
+}
 
 // --- Init ---
 loadDashboard();
