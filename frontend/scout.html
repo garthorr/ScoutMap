@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScoutMap — Field Entry</title>
+  <style>
+    :root {
+      --sa-red: #CE1126;
+      --sa-blue: #003F87;
+      --sa-tan: #D6CEBD;
+      --sa-gray: #515354;
+      --sa-white: #FFFFFF;
+      --sa-dark-blue: #003366;
+      --sa-light-tan: #E9E9E4;
+      --sa-dark-gray: #232528;
+      --sa-pale-gray: #858787;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--sa-light-tan);
+      color: var(--sa-dark-gray);
+      min-height: 100vh;
+    }
+    header {
+      background: linear-gradient(180deg, var(--sa-dark-blue) 0%, #002a5c 100%);
+      color: var(--sa-white);
+      padding: 14px 20px;
+      border-bottom: 3px solid var(--sa-red);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    header h1 { font-size: 18px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+    #scout-info-badge {
+      font-size: 12px;
+      background: rgba(255,255,255,.15);
+      padding: 4px 10px;
+      border-radius: 12px;
+      max-width: 50%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    /* --- Setup screen --- */
+    #setup-screen .card,
+    #house-list-screen .card,
+    #house-form-screen .card {
+      background: var(--sa-white);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
+      border-top: 3px solid var(--sa-blue);
+    }
+    .card h2 {
+      font-size: 18px;
+      color: var(--sa-dark-blue);
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--sa-red);
+    }
+    .field { margin-bottom: 14px; }
+    .field label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--sa-gray);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: .3px;
+    }
+    .field input, .field select, .field textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #c5c5c5;
+      border-radius: 8px;
+      font-size: 16px;
+      background: var(--sa-white);
+      -webkit-appearance: none;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus {
+      outline: none;
+      border-color: var(--sa-blue);
+      box-shadow: 0 0 0 3px rgba(0,63,135,.15);
+    }
+    .field textarea { height: 70px; resize: vertical; }
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: var(--sa-red);
+      color: var(--sa-white);
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      transition: background .15s;
+    }
+    .btn:hover { background: #a80d1e; }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    .btn-secondary {
+      background: var(--sa-blue);
+    }
+    .btn-secondary:hover { background: var(--sa-dark-blue); }
+    .btn-outline {
+      background: transparent;
+      border: 2px solid var(--sa-blue);
+      color: var(--sa-blue);
+    }
+    .btn-outline:hover { background: rgba(0,63,135,.08); }
+
+    /* --- House list --- */
+    .house-item {
+      display: flex;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid #e8e8e4;
+      gap: 12px;
+      cursor: pointer;
+      transition: background .1s;
+    }
+    .house-item:last-child { border-bottom: none; }
+    .house-item:active { background: #f0f4f8; }
+    .house-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--sa-blue);
+      color: var(--sa-white);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .house-num.done { background: #059669; }
+    .house-num.avoid { background: var(--sa-red); }
+    .house-details {
+      flex: 1;
+      min-width: 0;
+    }
+    .house-addr {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--sa-dark-gray);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .house-status {
+      font-size: 12px;
+      color: var(--sa-pale-gray);
+      margin-top: 2px;
+    }
+    .house-arrow {
+      color: var(--sa-pale-gray);
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    /* --- Toggle buttons --- */
+    .toggle-group {
+      display: flex;
+      gap: 0;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 2px solid #c5c5c5;
+    }
+    .toggle-btn {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      background: var(--sa-white);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--sa-gray);
+      transition: background .1s, color .1s;
+    }
+    .toggle-btn + .toggle-btn {
+      border-left: 1px solid #c5c5c5;
+    }
+    .toggle-btn.active-yes {
+      background: #059669;
+      color: var(--sa-white);
+    }
+    .toggle-btn.active-no {
+      background: var(--sa-red);
+      color: var(--sa-white);
+    }
+
+    /* --- Checkbox field --- */
+    .checkbox-field {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 0;
+    }
+    .checkbox-field input[type="checkbox"] {
+      width: 22px;
+      height: 22px;
+      accent-color: var(--sa-red);
+    }
+    .checkbox-field label {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--sa-dark-gray);
+      margin: 0;
+    }
+
+    /* --- Progress bar --- */
+    .progress-bar {
+      background: #e5e7eb;
+      border-radius: 6px;
+      height: 8px;
+      margin: 12px 0;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #059669;
+      border-radius: 6px;
+      transition: width .3s;
+    }
+    .progress-text {
+      font-size: 13px;
+      color: var(--sa-pale-gray);
+      text-align: center;
+    }
+
+    .screen { display: none; }
+    .screen.active { display: block; }
+
+    /* Amount field shown conditionally */
+    #donation-amount-wrap { display: none; margin-top: 10px; }
+    #donation-amount-wrap.visible { display: block; }
+
+    .btn-row { display: flex; gap: 10px; margin-top: 16px; }
+    .btn-row .btn { flex: 1; }
+
+    .group-label {
+      font-size: 14px;
+      color: var(--sa-blue);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ScoutMap</h1>
+    <div id="scout-info-badge"></div>
+  </header>
+
+  <div class="container">
+    <!-- Screen 1: Scout setup -->
+    <div id="setup-screen" class="screen active">
+      <div class="card">
+        <h2>Scout Information</h2>
+        <div class="field">
+          <label for="scout-name">Your Name</label>
+          <input id="scout-name" type="text" placeholder="First Last" required autocomplete="name" />
+        </div>
+        <div class="field">
+          <label for="scout-id-num">Scout ID Number</label>
+          <input id="scout-id-num" type="text" placeholder="ID Number" autocomplete="off" />
+        </div>
+      </div>
+      <div class="card">
+        <h2>Select Your Walk Group</h2>
+        <div class="field">
+          <label for="event-select">Event</label>
+          <select id="event-select"><option value="">Loading...</option></select>
+        </div>
+        <div class="field">
+          <label for="group-select">Walk Group</label>
+          <select id="group-select"><option value="">Select event first</option></select>
+        </div>
+      </div>
+      <button id="start-btn" class="btn" disabled>Start Walking</button>
+    </div>
+
+    <!-- Screen 2: House list -->
+    <div id="house-list-screen" class="screen">
+      <div class="card">
+        <h2 id="group-title">Walk Group</h2>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+        <div class="progress-text" id="progress-text">0 / 0 visited</div>
+        <div id="house-list"></div>
+      </div>
+      <button class="btn btn-outline" onclick="showScreen('setup-screen')" style="margin-top:10px;">Change Group</button>
+    </div>
+
+    <!-- Screen 3: House visit form -->
+    <div id="house-form-screen" class="screen">
+      <div class="card">
+        <h2 id="form-house-addr">123 Main St</h2>
+
+        <div class="field">
+          <label>Door Answer</label>
+          <div class="toggle-group" id="toggle-door">
+            <button type="button" class="toggle-btn" data-val="true" onclick="setToggle('door',true)">Yes</button>
+            <button type="button" class="toggle-btn" data-val="false" onclick="setToggle('door',false)">No Answer</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Donation</label>
+          <div class="toggle-group" id="toggle-donation">
+            <button type="button" class="toggle-btn" data-val="true" onclick="setToggle('donation',true)">Yes</button>
+            <button type="button" class="toggle-btn" data-val="false" onclick="setToggle('donation',false)">No</button>
+          </div>
+          <div id="donation-amount-wrap">
+            <input id="donation-amount" type="number" step="0.01" min="0" placeholder="Amount ($)" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Former Scout?</label>
+          <div class="toggle-group" id="toggle-former">
+            <button type="button" class="toggle-btn" data-val="true" onclick="setToggle('former',true)">Yes</button>
+            <button type="button" class="toggle-btn" data-val="false" onclick="setToggle('former',false)">No</button>
+          </div>
+        </div>
+
+        <div class="checkbox-field">
+          <input type="checkbox" id="avoid-house" />
+          <label for="avoid-house">Avoid this house in the future</label>
+        </div>
+
+        <div class="field">
+          <label for="visit-notes">Notes</label>
+          <textarea id="visit-notes" placeholder="Optional notes..."></textarea>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-outline" onclick="cancelForm()">Back</button>
+        <button class="btn" id="save-visit-btn" onclick="saveVisit()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/scout.js"></script>
+</body>
+</html>

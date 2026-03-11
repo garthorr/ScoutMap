@@ -246,6 +246,12 @@ def record_visit(
         notes=body.notes,
         follow_up=body.follow_up,
         volunteer_name=body.volunteer_name,
+        scout_name=body.scout_name,
+        scout_id=body.scout_id,
+        door_answer=body.door_answer,
+        donation_given=body.donation_given,
+        former_scout=body.former_scout,
+        avoid_house=body.avoid_house,
     )
     eh.status = "visited"
     db.add(visit)

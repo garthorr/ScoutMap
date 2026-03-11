@@ -162,6 +162,14 @@ class Visit(Base):
     volunteer_name = Column(String(200))
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Scout-entered fields
+    scout_name = Column(String(200))
+    scout_id = Column(String(100))
+    door_answer = Column(Boolean)                            # true = answered, false = no answer
+    donation_given = Column(Boolean)                         # true = donated
+    former_scout = Column(Boolean)                           # true = former scout
+    avoid_house = Column(Boolean, default=False)             # flag to avoid in future
+
     event_house = relationship("EventHouse", back_populates="visits")
 
 

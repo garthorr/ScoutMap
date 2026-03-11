@@ -108,24 +108,37 @@ class EventHouseOut(BaseModel):
 
 # --- Visits ---
 class VisitCreate(BaseModel):
-    outcome: str
+    outcome: Optional[str] = None
     donation_amount: Optional[float] = None
     tickets_purchased: int = 0
     notes: Optional[str] = None
     follow_up: bool = False
     volunteer_name: Optional[str] = None
+    # Scout-entered fields
+    scout_name: Optional[str] = None
+    scout_id: Optional[str] = None
+    door_answer: Optional[bool] = None
+    donation_given: Optional[bool] = None
+    former_scout: Optional[bool] = None
+    avoid_house: bool = False
 
 
 class VisitOut(BaseModel):
     id: UUID
     event_house_id: UUID
     visited_at: datetime
-    outcome: str
+    outcome: Optional[str] = None
     donation_amount: Optional[float] = None
     tickets_purchased: int = 0
     notes: Optional[str] = None
     follow_up: bool = False
     volunteer_name: Optional[str] = None
+    scout_name: Optional[str] = None
+    scout_id: Optional[str] = None
+    door_answer: Optional[bool] = None
+    donation_given: Optional[bool] = None
+    former_scout: Optional[bool] = None
+    avoid_house: bool = False
 
     class Config:
         from_attributes = True
