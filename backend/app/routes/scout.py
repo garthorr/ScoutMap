@@ -57,7 +57,7 @@ def add_scout(body: RosterCreate, db: Session = Depends(get_db)):
 
 @router.delete("/roster/{roster_id}")
 def remove_scout(roster_id: str, db: Session = Depends(get_db)):
-    s = db.query(ScoutRoster).get(roster_id)
+    s = db.query(ScoutRoster).filter(ScoutRoster.id == roster_id).first()
     if not s:
         raise HTTPException(404, "Scout not found")
     db.delete(s)
@@ -118,7 +118,7 @@ async def import_roster_csv(file: UploadFile = File(...), db: Session = Depends(
 
 @router.patch("/roster/{roster_id}")
 def toggle_scout(roster_id: str, db: Session = Depends(get_db)):
-    s = db.query(ScoutRoster).get(roster_id)
+    s = db.query(ScoutRoster).filter(ScoutRoster.id == roster_id).first()
     if not s:
         raise HTTPException(404, "Scout not found")
     s.active = not s.active

@@ -53,7 +53,7 @@ def houses_for_map(
 
 @router.get("/{house_id}", response_model=MasterHouseOut)
 def get_house(house_id: str, db: Session = Depends(get_db)):
-    house = db.query(MasterHouse).get(house_id)
+    house = db.query(MasterHouse).filter(MasterHouse.id == house_id).first()
     if not house:
         raise HTTPException(404, "House not found")
     return house

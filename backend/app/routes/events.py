@@ -53,7 +53,7 @@ def list_events(db: Session = Depends(get_db)):
 
 @router.get("/{event_id}", response_model=EventOut)
 def get_event(event_id: str, db: Session = Depends(get_db)):
-    event = db.query(FundraiserEvent).get(event_id)
+    event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
     if not event:
         raise HTTPException(404, "Event not found")
     return _enrich_event(event, db)
@@ -62,7 +62,7 @@ def get_event(event_id: str, db: Session = Depends(get_db)):
 @router.post("/{event_id}/assign", response_model=dict)
 def assign_houses(event_id: str, body: EventAssignRequest, db: Session = Depends(get_db)):
     """Generate event assignments from imported master houses."""
-    event = db.query(FundraiserEvent).get(event_id)
+    event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
     if not event:
         raise HTTPException(404, "Event not found")
 
@@ -116,7 +116,7 @@ def create_walk_groups(
     in order, then splits each street into chunks of ``group_size``.
     Each chunk becomes a numbered group.
     """
-    event = db.query(FundraiserEvent).get(event_id)
+    event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
     if not event:
         raise HTTPException(404, "Event not found")
 
