@@ -6,12 +6,12 @@ A door-to-door fundraising management application that uses **public data as the
 
 ```
 ┌─────────────┐     ┌─────────────────┐     ┌────────────┐
-│  Admin App   │────▶│  FastAPI Backend │────▶│ PostgreSQL │
-│  (/)         │◀────│  (Python)       │◀────│            │
-│              │     │  + SQLAlchemy   │     │            │
-│  Scout App   │────▶│                 │     │            │
-│  (/scout)    │◀────│                 │     │            │
-│  + Leaflet   │     │                 │     │            │
+│  Admin App  │────▶│ FastAPI Backend │────▶│ PostgreSQL │
+│  (/)        │◀────│  (Python)       │◀────│            │
+│             │     │  + SQLAlchemy   │     │            │
+│  Scout App  │────▶│                 │     │            │
+│  (/scout)   │◀────│                 │     │            │
+│  + Leaflet  │     │                 │     │            │
 └─────────────┘     └─────────────────┘     └────────────┘
 ```
 
