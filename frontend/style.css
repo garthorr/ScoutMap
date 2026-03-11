@@ -377,6 +377,11 @@ details[open] summary {
   text-transform: uppercase;
 }
 
+/* --- Map street list --- */
+#map-streets label:hover { background: #f5f5f0; border-radius: 3px; }
+#map-streets input[type="checkbox"] { margin-right: 4px; vertical-align: middle; }
+.leaflet-control-layers { font-size: 13px; }
+
 .hidden { display: none !important; }
 
 /* --- Print --- */

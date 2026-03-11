@@ -1,6 +1,6 @@
 /* global L */
 const API = "";
-let map, markersLayer, currentEventId, currentEventName;
+let map, currentEventId, currentEventName;
 
 // --- CSV Export Utility ---
 function exportCSV(filename, headers, rows) {
@@ -121,36 +121,263 @@ function _initTileDrag(grid) {
 }
 
 // --- Map ---
+let houseDotLayer, walkRouteLayer, streetHighlightLayer, layerControl;
+let _mapStreets = [];      // street data from /api/houses/streets
+let _selectedStreets = new Set();
+
+const GROUP_COLORS = [
+  "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+  "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990",
+  "#dcbeff", "#9A6324", "#800000", "#aaffc3", "#808000",
+  "#000075", "#a9a9a9",
+];
+
 function initMap() {
-  if (map) { map.invalidateSize(); refreshMapMarkers(); return; }
+  if (map) { map.invalidateSize(); refreshMapDots(); return; }
   setTimeout(() => {
     map = L.map("map").setView([32.78, -96.80], 12);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(map);
-    markersLayer = L.layerGroup().addTo(map);
-    map.on("moveend", refreshMapMarkers);
-    refreshMapMarkers();
+
+    houseDotLayer = L.layerGroup().addTo(map);
+    walkRouteLayer = L.layerGroup().addTo(map);
+    streetHighlightLayer = L.layerGroup().addTo(map);
+
+    layerControl = L.control.layers(null, {
+      "House Pins": houseDotLayer,
+      "Walk Group Routes": walkRouteLayer,
+      "Selected Streets": streetHighlightLayer,
+    }).addTo(map);
+
+    map.on("moveend", refreshMapDots);
+    refreshMapDots();
+    _loadMapEventSelect();
   }, 100);
 }
-async function refreshMapMarkers() {
+
+async function refreshMapDots() {
   if (!map) return;
   const b = map.getBounds();
   const params = new URLSearchParams({
     min_lat: b.getSouth(), max_lat: b.getNorth(),
     min_lon: b.getWest(), max_lon: b.getEast(),
-    limit: 500,
+    limit: 2000,
   });
   const r = await fetch(API + "/api/houses/map?" + params);
   const houses = await r.json();
-  markersLayer.clearLayers();
+  houseDotLayer.clearLayers();
   houses.forEach(h => {
     if (!h.latitude || !h.longitude) return;
-    const m = L.marker([h.latitude, h.longitude]);
-    m.bindPopup(`<b>${h.full_address}</b><br>${h.owner_name || ""}<br>` +
+    const dot = L.circleMarker([h.latitude, h.longitude], {
+      radius: 4, fillColor: "#003F87", color: "#003F87",
+      weight: 1, opacity: 0.8, fillOpacity: 0.6,
+    });
+    dot.bindPopup(`<b>${h.full_address}</b><br>${h.owner_name || ""}<br>` +
       (h.total_appraised_value ? `Appraised: $${h.total_appraised_value.toLocaleString()}` : ""));
-    markersLayer.addLayer(m);
+    houseDotLayer.addLayer(dot);
   });
+}
+
+async function _loadMapEventSelect() {
+  const sel = document.getElementById("map-event-select");
+  try {
+    const r = await fetch(API + "/api/events/");
+    const events = await r.json();
+    sel.innerHTML = '<option value="">Walk Groups: none</option>' +
+      events.map(e => `<option value="${e.id}">${e.name} (${e.house_count})</option>`).join("");
+  } catch { /* ignore */ }
+}
+
+document.getElementById("map-event-select").onchange = function () {
+  loadWalkRoutes(this.value);
+};
+
+async function loadWalkRoutes(eventId) {
+  walkRouteLayer.clearLayers();
+  if (!eventId) return;
+  const r = await fetch(API + `/api/events/${eventId}/houses`);
+  const houses = await r.json();
+  if (!houses.length) return;
+
+  // Group by assigned_to
+  const groups = {};
+  houses.forEach(eh => {
+    const key = eh.assigned_to || "Unassigned";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(eh);
+  });
+
+  let colorIdx = 0;
+  for (const [label, items] of Object.entries(groups)) {
+    const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
+    colorIdx++;
+
+    // Sort by address number for logical walking order
+    const sorted = items
+      .filter(eh => eh.house?.latitude && eh.house?.longitude)
+      .sort((a, b) => {
+        const an = parseInt(a.house.address_number) || 0;
+        const bn = parseInt(b.house.address_number) || 0;
+        return an - bn;
+      });
+
+    if (sorted.length < 1) continue;
+
+    // Draw polyline connecting houses in order
+    const coords = sorted.map(eh => [eh.house.latitude, eh.house.longitude]);
+    const line = L.polyline(coords, {
+      color, weight: 3, opacity: 0.7, dashArray: "8,6",
+    });
+    line.bindPopup(`<b>${label}</b><br>${sorted.length} houses`);
+    walkRouteLayer.addLayer(line);
+
+    // Draw dots at each house
+    sorted.forEach((eh, i) => {
+      const dot = L.circleMarker([eh.house.latitude, eh.house.longitude], {
+        radius: 5, fillColor: color, color: "#fff",
+        weight: 2, fillOpacity: 1,
+      });
+      dot.bindPopup(`<b>${i + 1}.</b> ${eh.house.full_address}<br>Group: ${label}<br>Status: ${eh.status}`);
+      walkRouteLayer.addLayer(dot);
+    });
+  }
+
+  // Fit map to routes
+  const allCoords = houses
+    .filter(eh => eh.house?.latitude && eh.house?.longitude)
+    .map(eh => [eh.house.latitude, eh.house.longitude]);
+  if (allCoords.length) map.fitBounds(L.latLngBounds(allCoords).pad(0.1));
+}
+
+// --- Street selection ---
+async function loadMapStreets() {
+  const zip = document.getElementById("map-zip").value.trim();
+  if (!zip) { alert("Enter a ZIP code."); return; }
+
+  document.getElementById("map-street-count").textContent = "Loading…";
+  try {
+    const r = await fetch(API + `/api/houses/streets?zip_code=${zip}`);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    _mapStreets = await r.json();
+  } catch (err) {
+    document.getElementById("map-street-count").textContent = "Error: " + err.message;
+    return;
+  }
+
+  _selectedStreets.clear();
+  document.getElementById("map-street-count").textContent =
+    `${_mapStreets.length} streets, ${_mapStreets.reduce((s, st) => s + st.count, 0)} houses`;
+  document.getElementById("map-street-list").style.display = "";
+  document.getElementById("map-street-search").value = "";
+  renderStreetCheckboxes();
+
+  // Zoom to houses
+  const allPts = _mapStreets.flatMap(s => s.houses.map(h => [h.lat, h.lon]));
+  if (allPts.length && map) map.fitBounds(L.latLngBounds(allPts).pad(0.1));
+}
+
+function renderStreetCheckboxes() {
+  const filter = (document.getElementById("map-street-search").value || "").toUpperCase();
+  const el = document.getElementById("map-streets");
+  const visible = filter
+    ? _mapStreets.filter(s => s.street.includes(filter))
+    : _mapStreets;
+
+  document.getElementById("map-street-filter-count").textContent =
+    filter ? `(${visible.length} of ${_mapStreets.length})` : `(${_mapStreets.length})`;
+
+  el.innerHTML = visible.map(s => {
+    const checked = _selectedStreets.has(s.street) ? " checked" : "";
+    return `<label style="display:block;margin-bottom:4px;font-size:13px;cursor:pointer;break-inside:avoid;">` +
+      `<input type="checkbox" value="${s.street}" onchange="toggleStreet(this)"${checked} /> ` +
+      `${s.street} <span style="color:var(--sa-pale-gray);">(${s.count})</span></label>`;
+  }).join("");
+  _updateSelectionSummary();
+}
+
+function toggleStreet(cb) {
+  if (cb.checked) _selectedStreets.add(cb.value);
+  else _selectedStreets.delete(cb.value);
+  _updateSelectionSummary();
+  _highlightSelectedStreets();
+}
+
+function selectAllVisibleStreets() {
+  document.querySelectorAll("#map-streets input[type=checkbox]").forEach(cb => {
+    cb.checked = true;
+    _selectedStreets.add(cb.value);
+  });
+  _updateSelectionSummary();
+  _highlightSelectedStreets();
+}
+
+function clearStreetSelection() {
+  _selectedStreets.clear();
+  document.querySelectorAll("#map-streets input[type=checkbox]").forEach(cb => cb.checked = false);
+  streetHighlightLayer.clearLayers();
+  _updateSelectionSummary();
+  const selEl = document.getElementById("map-selected-streets");
+  selEl.style.display = "none";
+}
+
+function _updateSelectionSummary() {
+  const count = _selectedStreets.size;
+  const houses = _mapStreets
+    .filter(s => _selectedStreets.has(s.street))
+    .reduce((sum, s) => sum + s.count, 0);
+  document.getElementById("map-selection-summary").textContent =
+    count ? `${count} street(s) selected, ${houses} houses` : "No streets selected";
+
+  const selEl = document.getElementById("map-selected-streets");
+  if (count) {
+    selEl.style.display = "";
+    selEl.innerHTML = "<strong>Selected:</strong> " + [..._selectedStreets].sort().join(", ");
+  } else {
+    selEl.style.display = "none";
+  }
+}
+
+function _highlightSelectedStreets() {
+  streetHighlightLayer.clearLayers();
+  _mapStreets.forEach(s => {
+    if (!_selectedStreets.has(s.street)) return;
+    const coords = s.houses.map(h => [h.lat, h.lon]);
+    if (coords.length < 1) return;
+
+    // Draw the street line
+    if (coords.length > 1) {
+      const line = L.polyline(coords, {
+        color: "#CE1126", weight: 4, opacity: 0.8,
+      });
+      line.bindPopup(`<b>${s.street}</b><br>${s.count} houses`);
+      streetHighlightLayer.addLayer(line);
+    }
+
+    // Dots at each house
+    s.houses.forEach(h => {
+      const dot = L.circleMarker([h.lat, h.lon], {
+        radius: 4, fillColor: "#CE1126", color: "#fff",
+        weight: 1.5, fillOpacity: 1,
+      });
+      dot.bindPopup(h.address);
+      streetHighlightLayer.addLayer(dot);
+    });
+  });
+}
+
+function copySelectedStreets() {
+  if (!_selectedStreets.size) { alert("No streets selected."); return; }
+  const streetStr = [..._selectedStreets].sort().join(", ");
+  // Fill into the walk group form
+  const wgStreetInput = document.querySelector('#walk-group-form [name="street_names"]');
+  const wgZipInput = document.querySelector('#walk-group-form [name="zip_code"]');
+  if (wgStreetInput) wgStreetInput.value = streetStr;
+  if (wgZipInput && document.getElementById("map-zip").value) {
+    wgZipInput.value = document.getElementById("map-zip").value;
+  }
+  showPage("walk-groups");
+  alert(`${_selectedStreets.size} street(s) copied to Walk Groups form.`);
 }
 
 // --- Events ---
