@@ -1,5 +1,7 @@
 """House endpoints – browse and manually add master house records."""
 
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -49,6 +51,39 @@ def houses_for_map(
         .limit(limit)
         .all()
     )
+
+
+@router.get("/streets")
+def list_streets(
+    zip_code: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Return streets in a ZIP with their house coordinates for map display."""
+    houses = (
+        db.query(MasterHouse)
+        .filter(
+            MasterHouse.zip_code == zip_code.strip(),
+            MasterHouse.street_name.isnot(None),
+            MasterHouse.latitude.isnot(None),
+            MasterHouse.longitude.isnot(None),
+        )
+        .order_by(MasterHouse.street_name, MasterHouse.address_number)
+        .all()
+    )
+    by_street = defaultdict(list)
+    for h in houses:
+        street = (h.street_name or "").upper().strip()
+        by_street[street].append({
+            "id": str(h.id),
+            "lat": h.latitude,
+            "lon": h.longitude,
+            "address": h.full_address,
+            "address_number": h.address_number,
+        })
+    return [
+        {"street": street, "count": len(pts), "houses": pts}
+        for street, pts in sorted(by_street.items())
+    ]
 
 
 @router.get("/{house_id}", response_model=MasterHouseOut)
