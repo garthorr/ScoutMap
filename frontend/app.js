@@ -108,15 +108,63 @@ async function loadEventHouses() {
   const houses = await r.json();
   const el = document.getElementById("event-houses-list");
   if (!houses.length) { el.innerHTML = "<p>No houses assigned.</p>"; return; }
-  el.innerHTML = `<table><tr><th>Address</th><th>Owner</th><th>Assigned To</th><th>Status</th><th></th></tr>` +
-    houses.map(eh => `<tr>
+
+  // Group by assigned_to label
+  const groups = {};
+  houses.forEach(eh => {
+    const key = eh.assigned_to || "Unassigned";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(eh);
+  });
+
+  let html = "";
+  for (const [label, items] of Object.entries(groups)) {
+    const visited = items.filter(eh => eh.status === "visited").length;
+    html += `<details open><summary><strong>${label}</strong> — ${items.length} houses, ${visited} visited</summary>`;
+    html += `<table><tr><th>#</th><th>Address</th><th>Owner</th><th>Status</th><th></th></tr>`;
+    html += items.map((eh, idx) => `<tr>
+      <td>${idx + 1}</td>
       <td>${eh.house.full_address}</td>
       <td>${eh.house.owner_name || "—"}</td>
-      <td>${eh.assigned_to || "—"}</td>
       <td><span class="badge badge-${eh.status}">${eh.status}</span></td>
       <td><button class="btn-sm" onclick="openVisitModal('${currentEventId}','${eh.id}')">Visit</button></td>
-    </tr>`).join("") + `</table>`;
+    </tr>`).join("");
+    html += `</table></details>`;
+  }
+  el.innerHTML = html;
 }
+
+document.getElementById("walk-group-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const body = {
+    zip_code: fd.get("zip_code"),
+    group_size: parseInt(fd.get("group_size") || "20"),
+  };
+  const streets = fd.get("street_names");
+  if (streets) body.street_names = streets.split(",").map(s => s.trim()).filter(Boolean);
+  const resultEl = document.getElementById("walk-group-result");
+  resultEl.classList.remove("hidden");
+  resultEl.textContent = "Generating groups…";
+  try {
+    const r = await fetch(API + `/api/events/${currentEventId}/walk-groups`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (r.ok && data.groups?.length) {
+      resultEl.innerHTML = `<strong>${data.groups.length} groups created (${data.total_assigned} new houses assigned)</strong>` +
+        `<ul>` + data.groups.map(g => `<li>${g.label} — ${g.houses} houses</li>`).join("") + `</ul>`;
+      loadEventHouses();
+    } else if (r.ok) {
+      resultEl.textContent = data.message || "No houses found.";
+    } else {
+      resultEl.textContent = "Error: " + (data.detail || JSON.stringify(data));
+    }
+  } catch (err) {
+    resultEl.textContent = "Network error: " + err.message;
+  }
+};
 
 document.getElementById("assign-form").onsubmit = async (e) => {
   e.preventDefault();
@@ -228,14 +276,21 @@ document.getElementById("import-form").onsubmit = async (e) => {
   loadUnmatched();
 };
 
+function importTitle(i) {
+  // Extract zip codes from notes like "ArcGIS fetch: TAXPAZIP LIKE '75252%'"
+  const zips = (i.notes || "").match(/\d{5}/g);
+  const zipLabel = zips ? "ZIP " + [...new Set(zips)].join(", ") : "";
+  const src = i.source_name === "arcgis_parcels" ? "ArcGIS" : i.source_name;
+  return [src, zipLabel, i.file_name || ""].filter(Boolean).join(" — ");
+}
+
 async function loadImports() {
   const r = await fetch(API + "/api/imports/");
   const imports = await r.json();
   document.getElementById("imports-list").innerHTML = imports.length
-    ? `<table><tr><th>Source</th><th>File</th><th>Records</th><th>Status</th><th>Date</th><th></th></tr>` +
+    ? `<table><tr><th>Import</th><th>Records</th><th>Status</th><th>Date</th><th></th></tr>` +
       imports.map(i => `<tr>
-        <td>${i.source_name}</td>
-        <td>${i.file_name || "—"}</td>
+        <td>${importTitle(i)}</td>
         <td>${i.record_count}</td>
         <td><span class="badge badge-${i.status}">${i.status}</span></td>
         <td>${new Date(i.created_at).toLocaleString()}</td>
