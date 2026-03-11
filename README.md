@@ -46,10 +46,10 @@ The admin interface for troop leaders to manage the fundraising campaign:
 - **Walk Groups** — auto-generate walkable groups by street/ZIP
 - **Import Data** — pull from ArcGIS or upload Dallas GIS / DCAD files
 - **Houses** — search and manually manage the master house list
-- **Roster** — manage the scout roster (names and IDs appear in the scout app dropdown)
+- **Roster** — manage the scout roster (add individually, import/export CSV)
 - **Scout Data** — view, aggregate, and export all field data entered by scouts
 
-All tables (houses, events, walk groups, scout data) are **exportable as CSV**.
+All tables (houses, events, walk groups, scout data, roster) are **exportable as CSV**.
 
 Data-modifying operations (walk group generation, imports) require **confirmation before overwriting** existing data.
 
@@ -69,6 +69,41 @@ A mobile-first field entry app for scouts to use while walking their routes:
 5. **Log out** — clears saved info and returns to setup
 
 Scout name and selection are saved to `localStorage` so scouts don't re-enter info between sessions.
+
+## Scout Roster Import/Export
+
+The roster can be managed individually or in bulk via CSV.
+
+### CSV Format
+
+```csv
+name,scout_id
+John Smith,12345
+Jane Doe,67890
+Alex Johnson,
+```
+
+| Column | Required | Description |
+|---|---|---|
+| `name` | Yes | Scout's full name |
+| `scout_id` | No | BSA member ID, troop number, or other identifier |
+
+- A **header row** is required
+- Extra columns are ignored
+- **Duplicate names** (case-insensitive) are skipped during import
+- Empty name rows are skipped
+- Export produces the same format, so you can export → edit → re-import
+
+### Import
+
+1. Go to the **Roster** page in the admin app
+2. Expand the **CSV Format Guide** to see the expected structure
+3. Select a `.csv` file and click **Import CSV**
+4. The status shows how many were added vs. skipped
+
+### Export
+
+Click **Export Roster CSV** at the bottom of the Roster page. The downloaded file uses the same `name,scout_id` format and can be re-imported.
 
 ## Data Model
 
@@ -234,6 +269,7 @@ To add a new public data source:
 |---|---|---|
 | `GET` | `/api/scout/roster` | List scout roster |
 | `POST` | `/api/scout/roster` | Add scout to roster |
+| `POST` | `/api/scout/roster/import` | Import roster from CSV (columns: name, scout_id) |
 | `PATCH` | `/api/scout/roster/{id}` | Toggle scout active/inactive |
 | `DELETE` | `/api/scout/roster/{id}` | Remove scout from roster |
 | `GET` | `/api/scout/events` | List events with walk group labels |

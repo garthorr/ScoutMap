@@ -1,6 +1,9 @@
 """Scout-facing API and admin roster/data endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import csv
+import io
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
@@ -60,6 +63,57 @@ def remove_scout(roster_id: str, db: Session = Depends(get_db)):
     db.delete(s)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/roster/import")
+async def import_roster_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Import scouts from a CSV file.
+
+    Expected columns (header row required):
+      name  — Scout's full name (required)
+      scout_id — Scout ID number (optional)
+
+    Extra columns are ignored. Duplicate names (case-insensitive) are skipped.
+    """
+    content = await file.read()
+    text = content.decode("utf-8-sig")  # handle BOM from Excel
+    reader = csv.DictReader(io.StringIO(text))
+
+    # Normalize header names: strip whitespace, lowercase
+    if reader.fieldnames:
+        reader.fieldnames = [f.strip().lower() for f in reader.fieldnames]
+
+    if not reader.fieldnames or "name" not in reader.fieldnames:
+        raise HTTPException(
+            400,
+            "CSV must have a header row with at least a 'name' column. "
+            "Optional: 'scout_id'. Example:\n\nname,scout_id\nJohn Smith,12345\nJane Doe,",
+        )
+
+    # Load existing names for dedup
+    existing = {
+        s.name.strip().lower()
+        for s in db.query(ScoutRoster.name).all()
+    }
+
+    added = 0
+    skipped = 0
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        if name.lower() in existing:
+            skipped += 1
+            continue
+
+        scout_id = (row.get("scout_id") or row.get("id") or "").strip() or None
+        db.add(ScoutRoster(name=name, scout_id=scout_id))
+        existing.add(name.lower())
+        added += 1
+
+    db.commit()
+    return {"added": added, "skipped": skipped}
 
 
 @router.patch("/roster/{roster_id}")
