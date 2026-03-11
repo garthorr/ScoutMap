@@ -213,32 +213,44 @@ async function loadWalkRoutes(eventId) {
     const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
     colorIdx++;
 
-    // Sort by address number for logical walking order
-    const sorted = items
-      .filter(eh => eh.house?.latitude && eh.house?.longitude)
-      .sort((a, b) => {
+    const withCoords = items.filter(eh => eh.house?.latitude && eh.house?.longitude);
+    if (!withCoords.length) continue;
+
+    // Sub-group by street_name within this walk group
+    const byStreet = {};
+    withCoords.forEach(eh => {
+      const street = (eh.house.street_name || "UNKNOWN").toUpperCase().trim();
+      if (!byStreet[street]) byStreet[street] = [];
+      byStreet[street].push(eh);
+    });
+
+    // Draw one trace per street — a midline down the street
+    for (const [street, streetHouses] of Object.entries(byStreet)) {
+      streetHouses.sort((a, b) => {
         const an = parseInt(a.house.address_number) || 0;
         const bn = parseInt(b.house.address_number) || 0;
         return an - bn;
       });
 
-    if (sorted.length < 1) continue;
-
-    // Draw polyline connecting houses in order
-    const coords = sorted.map(eh => [eh.house.latitude, eh.house.longitude]);
-    const line = L.polyline(coords, {
-      color, weight: 3, opacity: 0.7, dashArray: "8,6",
-    });
-    line.bindPopup(`<b>${label}</b><br>${sorted.length} houses`);
-    walkRouteLayer.addLayer(line);
+      if (streetHouses.length >= 2) {
+        // Compute midline: average lat/lon of adjacent pairs sorted by address
+        // Group into even/odd sides, then average to get center line
+        const midCoords = _streetMidline(streetHouses);
+        const line = L.polyline(midCoords, {
+          color, weight: 5, opacity: 0.7, lineCap: "round", lineJoin: "round",
+        });
+        line.bindPopup(`<b>${label}</b><br>${street}<br>${streetHouses.length} houses`);
+        walkRouteLayer.addLayer(line);
+      }
+    }
 
     // Draw dots at each house
-    sorted.forEach((eh, i) => {
+    withCoords.forEach((eh, i) => {
       const dot = L.circleMarker([eh.house.latitude, eh.house.longitude], {
         radius: 5, fillColor: color, color: "#fff",
         weight: 2, fillOpacity: 1,
       });
-      dot.bindPopup(`<b>${i + 1}.</b> ${eh.house.full_address}<br>Group: ${label}<br>Status: ${eh.status}`);
+      dot.bindPopup(`<b>${eh.house.full_address}</b><br>Group: ${label}<br>Status: ${eh.status}`);
       walkRouteLayer.addLayer(dot);
     });
   }
@@ -248,6 +260,63 @@ async function loadWalkRoutes(eventId) {
     .filter(eh => eh.house?.latitude && eh.house?.longitude)
     .map(eh => [eh.house.latitude, eh.house.longitude]);
   if (allCoords.length) map.fitBounds(L.latLngBounds(allCoords).pad(0.1));
+}
+
+/**
+ * Compute a midline trace for houses on a street.
+ * Groups houses by even/odd address numbers (opposite sides of street),
+ * then averages positions pairwise to trace down the center.
+ * Falls back to a simple averaged polyline if sides can't be determined.
+ */
+function _streetMidline(sortedHouses) {
+  const coords = sortedHouses.map(eh => ({
+    lat: eh.house.latitude,
+    lon: eh.house.longitude,
+    num: parseInt(eh.house.address_number) || 0,
+  }));
+
+  // Split into even/odd (opposite sides of street)
+  const even = coords.filter(c => c.num % 2 === 0);
+  const odd = coords.filter(c => c.num % 2 === 1);
+
+  // If we have houses on both sides, average matching pairs
+  if (even.length >= 2 && odd.length >= 2) {
+    const midpoints = [];
+    // Walk through sorted even/odd and pair nearest positions
+    const longer = even.length >= odd.length ? even : odd;
+    const shorter = even.length >= odd.length ? odd : even;
+
+    // Start midline from first house position (min address)
+    const firstPt = coords[0];
+    const lastPt = coords[coords.length - 1];
+
+    // Simple approach: take midpoints at regular intervals along both sides
+    const steps = Math.max(longer.length, 3);
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      const ei = Math.min(Math.floor(t * (even.length - 1) + 0.5), even.length - 1);
+      const oi = Math.min(Math.floor(t * (odd.length - 1) + 0.5), odd.length - 1);
+      midpoints.push([
+        (even[ei].lat + odd[oi].lat) / 2,
+        (even[ei].lon + odd[oi].lon) / 2,
+      ]);
+    }
+    return midpoints;
+  }
+
+  // Fallback: not enough on both sides, just use a smoothed center line
+  // Average consecutive pairs to reduce zig-zag
+  if (coords.length <= 2) {
+    return coords.map(c => [c.lat, c.lon]);
+  }
+  const mid = [];
+  for (let i = 0; i < coords.length - 1; i++) {
+    mid.push([
+      (coords[i].lat + coords[i + 1].lat) / 2,
+      (coords[i].lon + coords[i + 1].lon) / 2,
+    ]);
+  }
+  return mid;
 }
 
 // --- Street selection ---
@@ -342,13 +411,21 @@ function _highlightSelectedStreets() {
   streetHighlightLayer.clearLayers();
   _mapStreets.forEach(s => {
     if (!_selectedStreets.has(s.street)) return;
-    const coords = s.houses.map(h => [h.lat, h.lon]);
-    if (coords.length < 1) return;
+    if (s.houses.length < 1) return;
 
-    // Draw the street line
-    if (coords.length > 1) {
-      const line = L.polyline(coords, {
-        color: "#CE1126", weight: 4, opacity: 0.8,
+    // Sort by address number
+    const sorted = [...s.houses].sort((a, b) => {
+      const an = parseInt(a.address_number) || 0;
+      const bn = parseInt(b.address_number) || 0;
+      return an - bn;
+    });
+
+    // Draw midline street trace
+    if (sorted.length >= 2) {
+      const midCoords = _rawMidline(sorted);
+      const line = L.polyline(midCoords, {
+        color: "#CE1126", weight: 5, opacity: 0.8,
+        lineCap: "round", lineJoin: "round",
       });
       line.bindPopup(`<b>${s.street}</b><br>${s.count} houses`);
       streetHighlightLayer.addLayer(line);
@@ -364,6 +441,40 @@ function _highlightSelectedStreets() {
       streetHighlightLayer.addLayer(dot);
     });
   });
+}
+
+/** Midline from raw house data ({lat, lon, address_number}). */
+function _rawMidline(sortedHouses) {
+  const coords = sortedHouses.map(h => ({
+    lat: h.lat, lon: h.lon,
+    num: parseInt(h.address_number) || 0,
+  }));
+  const even = coords.filter(c => c.num % 2 === 0);
+  const odd = coords.filter(c => c.num % 2 === 1);
+
+  if (even.length >= 2 && odd.length >= 2) {
+    const midpoints = [];
+    const steps = Math.max(Math.max(even.length, odd.length), 3);
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      const ei = Math.min(Math.floor(t * (even.length - 1) + 0.5), even.length - 1);
+      const oi = Math.min(Math.floor(t * (odd.length - 1) + 0.5), odd.length - 1);
+      midpoints.push([
+        (even[ei].lat + odd[oi].lat) / 2,
+        (even[ei].lon + odd[oi].lon) / 2,
+      ]);
+    }
+    return midpoints;
+  }
+  if (coords.length <= 2) return coords.map(c => [c.lat, c.lon]);
+  const mid = [];
+  for (let i = 0; i < coords.length - 1; i++) {
+    mid.push([
+      (coords[i].lat + coords[i + 1].lat) / 2,
+      (coords[i].lon + coords[i + 1].lon) / 2,
+    ]);
+  }
+  return mid;
 }
 
 function copySelectedStreets() {
