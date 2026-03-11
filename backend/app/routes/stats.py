@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.database import get_db
-from app.models import MasterHouse, FundraiserEvent, Visit, UnmatchedRecord, SourceImport
+from app.models import MasterHouse, FundraiserEvent, Visit, UnmatchedRecord, SourceImport, ScoutRoster
 from app.schemas import DashboardStats
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
@@ -22,4 +22,7 @@ def dashboard(db: Session = Depends(get_db)):
             UnmatchedRecord.status == "pending"
         ).scalar() or 0,
         import_count=db.query(func.count(SourceImport.id)).scalar() or 0,
+        total_scouts=db.query(func.count(ScoutRoster.id)).filter(
+            ScoutRoster.active == True
+        ).scalar() or 0,
     )

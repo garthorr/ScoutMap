@@ -165,3 +165,4 @@ class DashboardStats(BaseModel):
     total_donations: float
     unmatched_count: int
     import_count: int
+    total_scouts: int = 0
