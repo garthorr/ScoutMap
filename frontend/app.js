@@ -561,6 +561,37 @@ async function deleteRosterScout(id) {
   loadRoster();
 }
 
+async function exportRosterCSV() {
+  const r = await fetch(API + "/api/scout/roster");
+  const roster = await r.json();
+  if (!roster.length) { alert("No scouts to export."); return; }
+  exportCSV("scout-roster.csv",
+    ["name", "scout_id"],
+    roster.map(s => [s.name, s.scout_id || ""])
+  );
+}
+
+document.getElementById("roster-import-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const statusEl = document.getElementById("roster-import-status");
+  statusEl.classList.remove("hidden");
+  statusEl.textContent = "Importing…";
+  try {
+    const r = await fetch(API + "/api/scout/roster/import", { method: "POST", body: fd });
+    const data = await r.json();
+    if (r.ok) {
+      statusEl.textContent = `Done! ${data.added} scout(s) added, ${data.skipped} skipped (duplicates or empty).`;
+      e.target.reset();
+      loadRoster();
+    } else {
+      statusEl.textContent = "Error: " + (data.detail || JSON.stringify(data));
+    }
+  } catch (err) {
+    statusEl.textContent = "Network error: " + err.message;
+  }
+};
+
 // --- Scout Data ---
 async function loadScoutDataEvents() {
   const sel = document.getElementById("sd-event-filter");
