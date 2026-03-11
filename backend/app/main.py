@@ -8,7 +8,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.database import engine, Base
-from app.routes import imports, houses, events, stats, arcgis
+from app.routes import imports, houses, events, stats, arcgis, scout
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 
@@ -23,6 +23,7 @@ app.include_router(houses.router)
 app.include_router(events.router)
 app.include_router(stats.router)
 app.include_router(arcgis.router)
+app.include_router(scout.router)
 
 # Serve frontend static files
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
@@ -33,3 +34,7 @@ if FRONTEND_DIR.exists():
     @app.get("/")
     async def root():
         return FileResponse(str(FRONTEND_DIR / "index.html"))
+
+    @app.get("/scout")
+    async def scout_page():
+        return FileResponse(str(FRONTEND_DIR / "scout.html"))
