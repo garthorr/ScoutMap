@@ -6,9 +6,12 @@ A door-to-door fundraising management application that uses **public data as the
 
 ```
 ┌─────────────┐     ┌─────────────────┐     ┌────────────┐
-│  Frontend    │────▶│  FastAPI Backend │────▶│ PostgreSQL │
-│  (HTML/JS)   │◀────│  (Python)       │◀────│            │
-│  + Leaflet   │     │  + SQLAlchemy   │     │            │
+│  Admin App   │────▶│  FastAPI Backend │────▶│ PostgreSQL │
+│  (/)         │◀────│  (Python)       │◀────│            │
+│              │     │  + SQLAlchemy   │     │            │
+│  Scout App   │────▶│                 │     │            │
+│  (/scout)    │◀────│                 │     │            │
+│  + Leaflet   │     │                 │     │            │
 └─────────────┘     └─────────────────┘     └────────────┘
 ```
 
@@ -25,10 +28,47 @@ git clone <repo-url>
 cd ScoutMap
 docker compose up --build
 
-# App is available at http://localhost:8000
+# Admin app:  http://localhost:8000
+# Scout app:  http://localhost:8000/scout
 ```
 
 That's it. The database is created automatically on first startup.
+
+## Two Apps, One System
+
+### Admin App (`/`)
+
+The admin interface for troop leaders to manage the fundraising campaign:
+
+- **Dashboard** — aggregate stats (houses, events, visits, donations)
+- **Map** — interactive Leaflet map of all house locations
+- **Events** — create fundraising events
+- **Walk Groups** — auto-generate walkable groups by street/ZIP
+- **Import Data** — pull from ArcGIS or upload Dallas GIS / DCAD files
+- **Houses** — search and manually manage the master house list
+- **Roster** — manage the scout roster (names and IDs appear in the scout app dropdown)
+- **Scout Data** — view, aggregate, and export all field data entered by scouts
+
+All tables (houses, events, walk groups, scout data) are **exportable as CSV**.
+
+Data-modifying operations (walk group generation, imports) require **confirmation before overwriting** existing data.
+
+### Scout App (`/scout`)
+
+A mobile-first field entry app for scouts to use while walking their routes:
+
+1. **Select identity** — pick name from the admin-managed roster dropdown, or choose "Other" to write in
+2. **Pick walk group** — select event and assigned group
+3. **Record visits** — for each house, enter:
+   - Door answer (Yes / No Answer)
+   - Donation (Yes / No, with amount field)
+   - Former Scout? (Yes / No)
+   - Avoid this house (checkbox)
+   - Notes (free text)
+4. **Progress tracking** — progress bar shows completion within the group
+5. **Log out** — clears saved info and returns to setup
+
+Scout name and selection are saved to `localStorage` so scouts don't re-enter info between sessions.
 
 ## Data Model
 
@@ -42,11 +82,13 @@ master_houses           Canonical house records (one per physical address)
     │
     ├── event_houses         Junction: house assigned to a fundraiser event
     │       │
-    │       └── visits       Visit outcomes (donation, notes, follow-up)
+    │       └── visits       Visit outcomes (donation, notes, follow-up, scout data)
     │
     └── unmatched_records    Records that could not be matched (for admin review)
 
 fundraiser_events       Campaign / event definitions
+
+scout_roster            Admin-managed list of scouts (populates scout app dropdown)
 ```
 
 ### Key Tables
@@ -55,10 +97,31 @@ fundraiser_events       Campaign / event definitions
 |---|---|
 | `source_imports` | Tracks each file upload: source name, batch ID, record count, status |
 | `master_houses` | One row per physical address with lat/lng, owner, parcel/appraisal data |
-| `house_source_links` | Links a house to its source import with `source_name`, `source_record_id`, `source_last_updated`, `import_batch_id`, and raw data snapshot |
+| `house_source_links` | Links a house to its source import with provenance and raw data snapshot |
 | `event_houses` | Assigns a master house to a fundraiser event with status tracking |
-| `visits` | Records visit outcome, donation amount, tickets, notes, follow-up flag |
+| `visits` | Records visit outcome, donation, scout info, door answer, former scout flag, avoid flag |
 | `unmatched_records` | Stores records that couldn't be matched for admin review |
+| `scout_roster` | Admin-managed scout names and IDs for the field app dropdown |
+
+## Workflow
+
+### Admin Workflow
+
+1. **Import public data** — ArcGIS fetch (recommended) or upload Dallas GIS / DCAD files
+2. **Create a fundraiser event** (Events page)
+3. **Add scouts to the roster** (Roster page) — these appear in the scout app dropdown
+4. **Generate walk groups** by ZIP code — houses are auto-grouped by street and sorted by address number
+5. **Share the scout app URL** (`/scout`) with scouts
+6. **Monitor progress** — Scout Data page shows per-scout stats, all visit records, and CSV export
+
+### Scout Workflow
+
+1. Open `/scout` on a phone
+2. Select name from roster (or write in), pick event and walk group
+3. Tap "Start Walking"
+4. For each house, tap to record: door answer, donation, former scout, avoid, notes
+5. Progress bar updates as houses are visited
+6. Log out when done
 
 ## Import Workflow
 
@@ -77,8 +140,8 @@ The app accepts CSV (and GeoJSON for GIS data) files from two built-in sources:
 ### 2. Import via Admin UI
 
 1. Go to **Import Data** in the nav bar
-2. Select the source type (Dallas GIS or DCAD)
-3. Upload the CSV/GeoJSON file
+2. **ArcGIS fetch** (recommended): enter ZIP codes and click Fetch — pulls data directly
+3. **File upload**: select source type, upload CSV/GeoJSON
 4. The import pipeline processes each row:
    - Normalizes the address
    - Checks for existing master house record (dedup)
@@ -143,52 +206,40 @@ To add a new public data source:
 4. Import it in `backend/app/routes/imports.py` so it's registered at startup
 5. Add an `<option>` to the source dropdown in `frontend/index.html`
 
-## Event Workflow
-
-1. **Import public data** (GIS addresses, DCAD appraisals)
-2. **Create a fundraiser event** (Events page)
-3. **Assign houses** to the event by ZIP code, street name, or limit
-4. **Print packets** for volunteers (use the Print Packet button)
-5. **Record visits** — outcomes, donations, tickets, notes, follow-up flags
-6. **View dashboard** for aggregate stats
-
-## Manual Entry
-
-Manual house creation is intentionally limited. The primary workflow is:
-
-- **Automated**: Import public data → houses are created automatically
-- **Manual**: Only when a house is missing from source data, admin can add it from the Houses page
-- **Always manual**: Visit outcomes, donation details, notes, follow-up flags
-
-## Sample Data
-
-The `sample_data/` directory contains sample CSV files for testing:
-
-```bash
-# With the app running:
-# 1. Go to Import Data
-# 2. Select "City of Dallas GIS Address Points"
-# 3. Upload sample_data/dallas_gis_sample.csv
-# 4. Then select "DCAD Appraisal / Parcel Data"
-# 5. Upload sample_data/dcad_sample.csv
-```
-
 ## API Endpoints
+
+### Admin / Core
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/api/imports/` | Upload and import a source file |
 | `GET` | `/api/imports/` | List all imports |
+| `DELETE` | `/api/imports/{id}` | Delete import and cascade-remove orphaned houses |
 | `GET` | `/api/imports/unmatched/` | List unmatched records |
+| `POST` | `/api/arcgis/fetch` | Fetch parcels from Dallas ArcGIS |
 | `GET` | `/api/houses/` | Search master houses |
 | `GET` | `/api/houses/map` | Get houses within map bounds |
 | `POST` | `/api/houses/` | Manually add a house |
 | `POST` | `/api/events/` | Create a fundraiser event |
 | `GET` | `/api/events/` | List events |
 | `POST` | `/api/events/{id}/assign` | Assign houses to event |
+| `POST` | `/api/events/{id}/walk-groups` | Generate walk groups by street |
 | `GET` | `/api/events/{id}/houses` | List event houses |
 | `POST` | `/api/events/{id}/houses/{ehId}/visits` | Record a visit |
 | `GET` | `/api/stats/` | Dashboard statistics |
+
+### Scout / Roster
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/scout/roster` | List scout roster |
+| `POST` | `/api/scout/roster` | Add scout to roster |
+| `PATCH` | `/api/scout/roster/{id}` | Toggle scout active/inactive |
+| `DELETE` | `/api/scout/roster/{id}` | Remove scout from roster |
+| `GET` | `/api/scout/events` | List events with walk group labels |
+| `GET` | `/api/scout/events/{id}/houses?group=...` | Houses in a walk group |
+| `GET` | `/api/scout/data` | All scout visit records (filterable by event) |
+| `GET` | `/api/scout/data/summary` | Per-scout aggregated stats |
 
 ## Development
 
