@@ -75,7 +75,7 @@ def list_imports(db: Session = Depends(get_db)):
 
 @router.get("/{import_id}", response_model=SourceImportOut)
 def get_import(import_id: str, db: Session = Depends(get_db)):
-    si = db.query(SourceImport).get(import_id)
+    si = db.query(SourceImport).filter(SourceImport.id == import_id).first()
     if not si:
         raise HTTPException(404, "Import not found")
     return si
@@ -88,7 +88,7 @@ def delete_import(import_id: str, db: Session = Depends(get_db)):
     Houses that were ONLY linked to this import (and aren't manually created
     or assigned to any event) are also removed.
     """
-    si = db.query(SourceImport).get(import_id)
+    si = db.query(SourceImport).filter(SourceImport.id == import_id).first()
     if not si:
         raise HTTPException(404, "Import not found")
 
@@ -122,7 +122,7 @@ def delete_import(import_id: str, db: Session = Depends(get_db)):
             if other_links:
                 continue
 
-            house = db.query(MasterHouse).get(house_id)
+            house = db.query(MasterHouse).filter(MasterHouse.id == house_id).first()
             if not house:
                 continue
 
