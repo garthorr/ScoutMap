@@ -188,25 +188,17 @@
       <h2>Walk Groups</h2>
       <div class="card card-highlight">
         <h3>Generate Walk Groups</h3>
-        <p class="help-text">Auto-group houses by street into walkable clusters. Houses on the same street are sorted by address number and split into groups of adjacent homes for scouts to walk.</p>
+        <p class="help-text">Auto-group the event's assigned houses by street into walkable clusters. Houses on the same street are sorted by address number and split into groups of adjacent homes for scouts to walk.</p>
         <form id="walk-group-form" class="inline-form">
           <span class="tooltip-wrap">
             <select id="wg-event-select" required>
               <option value="">Select an event…</option>
             </select>
-            <span class="tooltip">Event to assign walk groups to</span>
-          </span>
-          <span class="tooltip-wrap">
-            <input name="zip_code" placeholder="ZIP code" required />
-            <span class="tooltip">ZIP code to pull houses from</span>
+            <span class="tooltip">Event whose houses will be grouped</span>
           </span>
           <span class="tooltip-wrap">
             <input name="group_size" type="number" value="20" min="5" max="100" />
             <span class="tooltip">Number of houses per walk group</span>
-          </span>
-          <span class="tooltip-wrap">
-            <input name="street_names" placeholder="Streets (optional, comma-sep)" />
-            <span class="tooltip">Limit to specific streets, or leave blank for all</span>
           </span>
           <button type="submit" title="Generate walk groups for scouts">Generate Groups</button>
         </form>
