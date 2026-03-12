@@ -79,6 +79,59 @@ def get_event(event_id: str, db: Session = Depends(get_db)):
     return _enrich_event(event, db)
 
 
+class EventUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    event_date: Optional[str] = None
+
+
+@router.put("/{event_id}", response_model=EventOut)
+def update_event(
+    event_id: str,
+    body: EventUpdate,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Event not found")
+    if body.name is not None:
+        event.name = body.name.strip()
+    if body.description is not None:
+        event.description = body.description.strip() or None
+    if body.event_date is not None:
+        from datetime import datetime as dt
+        try:
+            event.event_date = dt.fromisoformat(body.event_date.replace("Z", "+00:00")) if body.event_date else None
+        except ValueError:
+            event.event_date = None
+    db.commit()
+    db.refresh(event)
+    return _enrich_event(event, db)
+
+
+@router.delete("/{event_id}")
+def delete_event(
+    event_id: str,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Event not found")
+
+    # Delete visits for all event_houses in this event
+    event_house_ids = [
+        eh.id for eh in db.query(EventHouse).filter(EventHouse.event_id == event_id).all()
+    ]
+    if event_house_ids:
+        db.query(Visit).filter(Visit.event_house_id.in_(event_house_ids)).delete(synchronize_session=False)
+    db.query(EventHouse).filter(EventHouse.event_id == event_id).delete(synchronize_session=False)
+    db.delete(event)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/{event_id}/assign", response_model=dict)
 def assign_houses(event_id: str, body: EventAssignRequest, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Generate event assignments from imported master houses."""
