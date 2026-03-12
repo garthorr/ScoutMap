@@ -1,16 +1,18 @@
 """FastAPI application entry point."""
 
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 
 from sqlalchemy import inspect, text
 
 from app.config import settings
-from app.database import engine, Base
+from app.database import engine, Base, get_db
 from app.routes import imports, houses, events, stats, arcgis, scout
+from app.routes.auth import router as auth_router, get_current_user
+from app.models import AllowedEmail, AuthSession
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -47,9 +49,81 @@ def _ensure_columns():
 
 _ensure_columns()
 
+
+def _seed_allowed_emails():
+    """Seed allowed emails from ALLOWED_EMAILS env var if table is empty."""
+    if not settings.allowed_emails:
+        return
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        if db.query(AllowedEmail).count() > 0:
+            return  # already seeded
+        for raw in settings.allowed_emails.split(","):
+            email = raw.strip().lower()
+            if email:
+                db.add(AllowedEmail(email=email))
+                logger.info("Seeded allowed email: %s", email)
+        db.commit()
+    finally:
+        db.close()
+
+
+_seed_allowed_emails()
+
 app = FastAPI(title=settings.app_title)
 
+# Public paths that don't require authentication
+_PUBLIC_PATHS = {
+    "/api/auth/request-code",
+    "/api/auth/verify-code",
+    "/api/auth/logout",
+}
+_PUBLIC_PREFIXES = ("/static/", "/api/auth/")
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Require valid session token for all API routes (except auth endpoints)."""
+    path = request.url.path
+
+    # Skip auth for static files, auth endpoints, and page routes
+    if path in ("/", "/scout", "/favicon.ico"):
+        return await call_next(request)
+    if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+        return await call_next(request)
+
+    # All /api/* routes require auth
+    if path.startswith("/api/"):
+        token = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+        if not token:
+            token = request.cookies.get("scoutmap_token")
+
+        if not token:
+            return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+        # Validate session
+        from datetime import datetime
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            session = db.query(AuthSession).filter(
+                AuthSession.token == token,
+                AuthSession.expires_at > datetime.utcnow(),
+            ).first()
+            if not session:
+                return JSONResponse({"detail": "Session expired or invalid"}, status_code=401)
+        finally:
+            db.close()
+
+    return await call_next(request)
+
+
 # Register API routers
+app.include_router(auth_router)
 app.include_router(imports.router)
 app.include_router(houses.router)
 app.include_router(events.router)

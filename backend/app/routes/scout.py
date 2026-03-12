@@ -2,6 +2,7 @@
 
 import csv
 import io
+from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
@@ -94,6 +95,7 @@ async def import_roster_csv(file: UploadFile = File(...), db: Session = Depends(
     existing = {
         s.name.strip().lower()
         for s in db.query(ScoutRoster.name).all()
+        if s.name
     }
 
     added = 0
@@ -135,21 +137,29 @@ def list_scout_events(db: Session = Depends(get_db)):
     events = db.query(FundraiserEvent).order_by(
         FundraiserEvent.created_at.desc()
     ).all()
-    result = []
-    for ev in events:
-        groups = (
-            db.query(EventHouse.assigned_to)
-            .filter(EventHouse.event_id == ev.id, EventHouse.assigned_to.isnot(None))
+
+    # Batch-fetch all distinct group labels for all events in one query
+    event_ids = [ev.id for ev in events]
+    groups_by_event = defaultdict(list)
+    if event_ids:
+        group_rows = (
+            db.query(EventHouse.event_id, EventHouse.assigned_to)
+            .filter(EventHouse.event_id.in_(event_ids), EventHouse.assigned_to.isnot(None))
             .distinct()
             .all()
         )
-        result.append({
+        for event_id, label in group_rows:
+            groups_by_event[event_id].append(label)
+
+    return [
+        {
             "id": str(ev.id),
             "name": ev.name,
             "event_date": ev.event_date.isoformat() if ev.event_date else None,
-            "groups": sorted([g[0] for g in groups]),
-        })
-    return result
+            "groups": sorted(groups_by_event.get(ev.id, [])),
+        }
+        for ev in events
+    ]
 
 
 @router.get("/events/{event_id}/houses")

@@ -384,6 +384,100 @@ details[open] summary {
 
 .hidden { display: none !important; }
 
+/* --- Login overlay --- */
+#login-overlay {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(135deg, var(--sa-dark-blue) 0%, #001a3d 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+#login-overlay.hidden { display: none; }
+.login-box {
+  background: var(--sa-white);
+  border-radius: 14px;
+  padding: 40px 36px;
+  width: 380px;
+  max-width: 90vw;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,.3);
+  border-top: 5px solid var(--sa-red);
+}
+.login-box h1 {
+  font-size: 28px;
+  color: var(--sa-dark-blue);
+  margin-bottom: 4px;
+}
+.login-subtitle {
+  font-size: 13px;
+  color: var(--sa-pale-gray);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 28px;
+}
+.login-box label {
+  display: block;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sa-gray);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.login-box input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #c5c5c5;
+  border-radius: 8px;
+  font-size: 16px;
+  margin-bottom: 14px;
+  text-align: center;
+}
+.login-box input:focus {
+  outline: none;
+  border-color: var(--sa-blue);
+  box-shadow: 0 0 0 3px rgba(0,63,135,.15);
+}
+.login-box button {
+  width: 100%;
+  padding: 12px;
+  font-size: 15px;
+}
+.login-info {
+  font-size: 14px;
+  color: var(--sa-gray);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.login-error {
+  color: var(--sa-red);
+  font-size: 13px;
+  margin-top: 8px;
+  min-height: 18px;
+}
+.login-back {
+  background: none !important;
+  color: var(--sa-blue) !important;
+  box-shadow: none !important;
+  font-size: 13px !important;
+  margin-top: 12px;
+  text-transform: none !important;
+  padding: 6px !important;
+}
+.login-back:hover {
+  background: none !important;
+  text-decoration: underline;
+}
+#login-code {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  font-family: monospace;
+}
+
 /* --- Print --- */
 @media print {
   #navbar, .inline-form, button, .modal, #app-footer { display: none !important; }

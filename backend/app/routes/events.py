@@ -5,7 +5,7 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from typing import Optional
 
 from app.database import get_db
@@ -47,8 +47,26 @@ def create_event(body: EventCreate, db: Session = Depends(get_db)):
 
 @router.get("/", response_model=list[EventOut])
 def list_events(db: Session = Depends(get_db)):
-    events = db.query(FundraiserEvent).order_by(FundraiserEvent.created_at.desc()).all()
-    return [_enrich_event(e, db) for e in events]
+    # Single query: get all events with house counts via subquery
+    count_sub = (
+        db.query(EventHouse.event_id, func.count(EventHouse.id).label("cnt"))
+        .group_by(EventHouse.event_id)
+        .subquery()
+    )
+    rows = (
+        db.query(FundraiserEvent, func.coalesce(count_sub.c.cnt, 0))
+        .outerjoin(count_sub, FundraiserEvent.id == count_sub.c.event_id)
+        .order_by(FundraiserEvent.created_at.desc())
+        .all()
+    )
+    return [
+        EventOut(
+            id=ev.id, name=ev.name, description=ev.description,
+            event_date=ev.event_date, created_at=ev.created_at,
+            house_count=cnt,
+        )
+        for ev, cnt in rows
+    ]
 
 
 @router.get("/{event_id}", response_model=EventOut)
@@ -73,20 +91,27 @@ def assign_houses(event_id: str, body: EventAssignRequest, db: Session = Depends
     if body.zip_codes:
         q = q.filter(MasterHouse.zip_code.in_(body.zip_codes))
     if body.street_names:
-        from sqlalchemy import or_
-        patterns = [MasterHouse.normalized_address.ilike(f"%{s.upper()}%") for s in body.street_names]
+        patterns = [MasterHouse.normalized_address.ilike(f"%{s.strip().upper()}%") for s in body.street_names]
         q = q.filter(or_(*patterns))
     if body.limit:
         q = q.limit(body.limit)
 
     houses = q.all()
+    house_ids = [h.id for h in houses]
+
+    # Batch-fetch existing assignments
+    existing_ids = set()
+    if house_ids:
+        existing_ids = {
+            row[0] for row in
+            db.query(EventHouse.house_id)
+            .filter(EventHouse.event_id == event.id, EventHouse.house_id.in_(house_ids))
+            .all()
+        }
+
     added = 0
     for h in houses:
-        exists = db.query(EventHouse).filter(
-            EventHouse.event_id == event.id,
-            EventHouse.house_id == h.id,
-        ).first()
-        if not exists:
+        if h.id not in existing_ids:
             db.add(EventHouse(
                 event_id=event.id,
                 house_id=h.id,
@@ -95,7 +120,10 @@ def assign_houses(event_id: str, body: EventAssignRequest, db: Session = Depends
             added += 1
 
     db.commit()
-    return {"assigned": added, "total_in_event": added}
+    total = db.query(func.count(EventHouse.id)).filter(
+        EventHouse.event_id == event.id
+    ).scalar() or 0
+    return {"assigned": added, "total_in_event": total}
 
 
 class WalkGroupRequest(BaseModel):
@@ -128,7 +156,6 @@ def create_walk_groups(
         MasterHouse.street_name.isnot(None),
     )
     if body.street_names:
-        from sqlalchemy import or_
         patterns = [
             MasterHouse.street_name.ilike(f"%{s.strip()}%")
             for s in body.street_names
@@ -166,26 +193,36 @@ def create_walk_groups(
             groups.append({"label": label, "house_ids": [h.id for h in chunk]})
             group_num += 1
 
+    # Batch-fetch existing EventHouse rows for this event
+    all_house_ids = [hid for g in groups for hid in g["house_ids"]]
+    existing_map = {}
+    if all_house_ids:
+        for eh in (
+            db.query(EventHouse)
+            .filter(EventHouse.event_id == event.id, EventHouse.house_id.in_(all_house_ids))
+            .all()
+        ):
+            existing_map[eh.house_id] = eh
+
     # Create EventHouse rows
     total_assigned = 0
     group_summaries = []
     for g in groups:
         added = 0
         for house_id in g["house_ids"]:
-            exists = db.query(EventHouse).filter(
-                EventHouse.event_id == event.id,
-                EventHouse.house_id == house_id,
-            ).first()
-            if not exists:
-                db.add(EventHouse(
+            existing = existing_map.get(house_id)
+            if not existing:
+                new_eh = EventHouse(
                     event_id=event.id,
                     house_id=house_id,
                     assigned_to=g["label"],
-                ))
+                )
+                db.add(new_eh)
+                existing_map[house_id] = new_eh
                 added += 1
             else:
                 # Update group label for already-assigned houses
-                exists.assigned_to = g["label"]
+                existing.assigned_to = g["label"]
         total_assigned += added
         group_summaries.append({"label": g["label"], "houses": len(g["house_ids"]), "new": added})
 
