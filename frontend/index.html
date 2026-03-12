@@ -8,6 +8,29 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+  <!-- Login Overlay -->
+  <div id="login-overlay">
+    <div class="login-box">
+      <h1>⚜ ScoutMap</h1>
+      <p class="login-subtitle">Scouting America Fundraising Tool</p>
+
+      <div id="login-step-email">
+        <label for="login-email">Email Address</label>
+        <input id="login-email" type="email" placeholder="you@example.com" autocomplete="email" />
+        <button id="login-send-btn" onclick="loginRequestCode()">Send Login Code</button>
+        <p id="login-email-error" class="login-error"></p>
+      </div>
+
+      <div id="login-step-code" style="display:none">
+        <p class="login-info">Enter the 6-digit code sent to <strong id="login-code-email"></strong></p>
+        <input id="login-code" type="text" maxlength="6" placeholder="000000" autocomplete="one-time-code" inputmode="numeric" />
+        <button id="login-verify-btn" onclick="loginVerifyCode()">Verify Code</button>
+        <p id="login-code-error" class="login-error"></p>
+        <button class="login-back" onclick="loginBackToEmail()">Use a different email</button>
+      </div>
+    </div>
+  </div>
+
   <nav id="navbar">
     <h1>⚜ ScoutMap</h1>
     <div class="nav-links">
@@ -19,7 +42,9 @@
       <a href="#" onclick="showPage('houses', event)" title="Search and manage the master house list">Houses</a>
       <a href="#" onclick="showPage('roster', event)" title="Manage scout roster">Roster</a>
       <a href="#" onclick="showPage('scout-data', event)" title="View data entered by scouts">Scout Data</a>
+      <a href="#" onclick="showPage('settings', event)" title="Manage allowed emails and settings">Settings</a>
       <a href="/scout" target="_blank" title="Open scout field app" style="border:1px solid var(--sa-pale-blue);">Scout App</a>
+      <a href="#" onclick="appLogout()" title="Log out" style="color:var(--sa-pale-gray);">Log Out</a>
     </div>
   </nav>
 
@@ -345,6 +370,25 @@ Alex Johnson,</pre>
       <div class="card">
         <h3>All Visit Records</h3>
         <div id="scout-data-list"></div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="page-settings" class="page">
+      <h2>Settings</h2>
+      <div class="card">
+        <h3>Logged In</h3>
+        <p style="font-size:14px;color:var(--sa-gray);margin-bottom:10px;">Signed in as <strong id="settings-user-email"></strong></p>
+        <button class="btn-sm" onclick="appLogout()">Log Out</button>
+      </div>
+      <div class="card">
+        <h3>Allowed Emails</h3>
+        <p class="help-text">Only these email addresses (or patterns like <code>*@example.com</code>) can log in. Add exact emails or wildcard patterns.</p>
+        <form id="allowed-email-form" class="inline-form" onsubmit="addAllowedEmail(event)">
+          <input name="email" placeholder="email@example.com or *@domain.com" required style="min-width:280px;" />
+          <button type="submit">Add Email</button>
+        </form>
+        <div id="allowed-emails-list" style="margin-top:12px;"></div>
       </div>
     </section>
 

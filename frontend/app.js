@@ -2,6 +2,178 @@
 const API = "";
 let map, currentEventId, currentEventName;
 
+// --- Auth ---
+let _authToken = localStorage.getItem("scoutmap_token") || "";
+
+function _authHeaders() {
+  const h = { "Content-Type": "application/json" };
+  if (_authToken) h["Authorization"] = "Bearer " + _authToken;
+  return h;
+}
+
+/** Authenticated fetch wrapper — injects Bearer token. */
+function authFetch(url, opts = {}) {
+  opts.headers = opts.headers || {};
+  if (_authToken) opts.headers["Authorization"] = "Bearer " + _authToken;
+  return fetch(url, opts);
+}
+
+async function _checkAuth() {
+  if (!_authToken) { _showLogin(); return; }
+  try {
+    const r = await authFetch(API + "/api/auth/me");
+    if (r.ok) {
+      const data = await r.json();
+      _hideLogin();
+      document.getElementById("settings-user-email").textContent = data.email;
+    } else {
+      _authToken = "";
+      localStorage.removeItem("scoutmap_token");
+      _showLogin();
+    }
+  } catch {
+    _showLogin();
+  }
+}
+
+function _showLogin() {
+  document.getElementById("login-overlay").classList.remove("hidden");
+}
+function _hideLogin() {
+  document.getElementById("login-overlay").classList.add("hidden");
+}
+
+async function loginRequestCode() {
+  const email = document.getElementById("login-email").value.trim();
+  const errEl = document.getElementById("login-email-error");
+  errEl.textContent = "";
+  if (!email || !email.includes("@")) { errEl.textContent = "Enter a valid email."; return; }
+
+  const btn = document.getElementById("login-send-btn");
+  btn.disabled = true;
+  btn.textContent = "Sending…";
+
+  try {
+    const r = await fetch(API + "/api/auth/request-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      document.getElementById("login-code-email").textContent = email;
+      document.getElementById("login-step-email").style.display = "none";
+      document.getElementById("login-step-code").style.display = "";
+      document.getElementById("login-code").value = "";
+      document.getElementById("login-code").focus();
+    } else {
+      errEl.textContent = data.detail || "Error sending code.";
+    }
+  } catch (err) {
+    errEl.textContent = "Network error: " + err.message;
+  }
+  btn.disabled = false;
+  btn.textContent = "Send Login Code";
+}
+
+async function loginVerifyCode() {
+  const email = document.getElementById("login-code-email").textContent;
+  const code = document.getElementById("login-code").value.trim();
+  const errEl = document.getElementById("login-code-error");
+  errEl.textContent = "";
+  if (!code || code.length < 6) { errEl.textContent = "Enter the 6-digit code."; return; }
+
+  const btn = document.getElementById("login-verify-btn");
+  btn.disabled = true;
+  btn.textContent = "Verifying…";
+
+  try {
+    const r = await fetch(API + "/api/auth/verify-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code }),
+    });
+    const data = await r.json();
+    if (r.ok && data.token) {
+      _authToken = data.token;
+      localStorage.setItem("scoutmap_token", _authToken);
+      _hideLogin();
+      document.getElementById("settings-user-email").textContent = data.email;
+      loadDashboard();
+    } else {
+      errEl.textContent = data.detail || "Invalid or expired code.";
+    }
+  } catch (err) {
+    errEl.textContent = "Network error: " + err.message;
+  }
+  btn.disabled = false;
+  btn.textContent = "Verify Code";
+}
+
+function loginBackToEmail() {
+  document.getElementById("login-step-email").style.display = "";
+  document.getElementById("login-step-code").style.display = "none";
+  document.getElementById("login-code-error").textContent = "";
+}
+
+async function appLogout() {
+  try { await authFetch(API + "/api/auth/logout", { method: "POST" }); } catch { /* ok */ }
+  _authToken = "";
+  localStorage.removeItem("scoutmap_token");
+  _showLogin();
+  document.getElementById("login-step-email").style.display = "";
+  document.getElementById("login-step-code").style.display = "none";
+  document.getElementById("login-email").value = "";
+  document.getElementById("login-email-error").textContent = "";
+}
+
+// Allow Enter key on login inputs
+document.getElementById("login-email").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); loginRequestCode(); }
+});
+document.getElementById("login-code").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); loginVerifyCode(); }
+});
+
+// --- Settings: Allowed Emails ---
+async function loadAllowedEmails() {
+  const r = await authFetch(API + "/api/auth/allowed-emails");
+  const emails = await r.json();
+  const el = document.getElementById("allowed-emails-list");
+  if (!emails.length) { el.innerHTML = "<p>No allowed emails configured.</p>"; return; }
+  el.innerHTML = `<table><tr><th>Email / Pattern</th><th>Added</th><th></th></tr>` +
+    emails.map(e => `<tr>
+      <td>${e.email}</td>
+      <td>${new Date(e.created_at).toLocaleDateString()}</td>
+      <td><button class="btn-sm btn-danger" onclick="removeAllowedEmail('${e.id}')">Remove</button></td>
+    </tr>`).join("") + `</table>`;
+}
+
+async function addAllowedEmail(evt) {
+  evt.preventDefault();
+  const input = document.querySelector('#allowed-email-form [name="email"]');
+  const email = input.value.trim();
+  if (!email) return;
+  const r = await authFetch(API + "/api/auth/allowed-emails", {
+    method: "POST",
+    headers: _authHeaders(),
+    body: JSON.stringify({ email }),
+  });
+  if (r.ok) {
+    input.value = "";
+    loadAllowedEmails();
+  } else {
+    const data = await r.json();
+    alert(data.detail || "Error adding email");
+  }
+}
+
+async function removeAllowedEmail(id) {
+  if (!confirm("Remove this email from the allowlist?")) return;
+  await authFetch(API + "/api/auth/allowed-emails/" + id, { method: "DELETE" });
+  loadAllowedEmails();
+}
+
 // --- CSV Export Utility ---
 function exportCSV(filename, headers, rows) {
   const escape = (v) => {
@@ -35,6 +207,7 @@ function showPage(name, evt) {
   if (name === "walk-groups") loadWalkGroupEvents();
   if (name === "roster") loadRoster();
   if (name === "scout-data") { loadScoutDataEvents(); loadScoutData(); }
+  if (name === "settings") loadAllowedEmails();
 }
 
 // --- Dashboard ---
@@ -53,7 +226,7 @@ function _savedTileOrder() {
 }
 
 async function loadDashboard() {
-  const r = await fetch(API + "/api/stats/");
+  const r = await authFetch(API + "/api/stats/");
   const s = await r.json();
   const tiles = [
     { key: "Houses",    value: s.total_houses },
@@ -164,7 +337,7 @@ async function refreshMapDots() {
     min_lon: b.getWest(), max_lon: b.getEast(),
     limit: 2000,
   });
-  const r = await fetch(API + "/api/houses/map?" + params);
+  const r = await authFetch(API + "/api/houses/map?" + params);
   const houses = await r.json();
   houseDotLayer.clearLayers();
   houses.forEach(h => {
@@ -182,7 +355,7 @@ async function refreshMapDots() {
 async function _loadMapEventSelect() {
   const sel = document.getElementById("map-event-select");
   try {
-    const r = await fetch(API + "/api/events/");
+    const r = await authFetch(API + "/api/events/");
     const events = await r.json();
     sel.innerHTML = '<option value="">Walk Groups: none</option>' +
       events.map(e => `<option value="${e.id}">${e.name} (${e.house_count})</option>`).join("");
@@ -196,7 +369,7 @@ document.getElementById("map-event-select").onchange = function () {
 async function loadWalkRoutes(eventId) {
   walkRouteLayer.clearLayers();
   if (!eventId) return;
-  const r = await fetch(API + `/api/events/${eventId}/houses`);
+  const r = await authFetch(API + `/api/events/${eventId}/houses`);
   const houses = await r.json();
   if (!houses.length) return;
 
@@ -311,7 +484,7 @@ async function loadMapStreets() {
 
   document.getElementById("map-street-count").textContent = "Loading…";
   try {
-    const r = await fetch(API + `/api/houses/streets?zip_code=${zip}`);
+    const r = await authFetch(API + `/api/houses/streets?zip_code=${zip}`);
     if (!r.ok) throw new Error("HTTP " + r.status);
     _mapStreets = await r.json();
   } catch (err) {
@@ -444,7 +617,7 @@ function copySelectedStreets() {
 
 // --- Events ---
 async function loadEvents() {
-  const r = await fetch(API + "/api/events/");
+  const r = await authFetch(API + "/api/events/");
   const events = await r.json();
   document.getElementById("events-list").innerHTML = events.length
     ? `<table><tr><th>Name</th><th>Date</th><th>Houses</th><th></th></tr>` +
@@ -457,7 +630,7 @@ async function loadEvents() {
     : "<p>No events yet.</p>";
 }
 async function exportEventsCSV() {
-  const r = await fetch(API + "/api/events/");
+  const r = await authFetch(API + "/api/events/");
   const events = await r.json();
   if (!events.length) { alert("No events to export."); return; }
   exportCSV("events.csv",
@@ -474,7 +647,7 @@ document.getElementById("event-form").onsubmit = async (e) => {
   const body = Object.fromEntries(fd);
   if (body.event_date) body.event_date = new Date(body.event_date).toISOString();
   else delete body.event_date;
-  await fetch(API + "/api/events/", {
+  await authFetch(API + "/api/events/", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -517,7 +690,7 @@ function _renderGroupedHouses(houses, { openByDefault = false } = {}) {
 
 let _eventHousesCache = [];
 async function loadEventHouses() {
-  const r = await fetch(API + `/api/events/${currentEventId}/houses`);
+  const r = await authFetch(API + `/api/events/${currentEventId}/houses`);
   const houses = await r.json();
   _eventHousesCache = houses;
   const el = document.getElementById("event-houses-list");
@@ -537,7 +710,7 @@ document.getElementById("assign-form").onsubmit = async (e) => {
   if (limit) body.limit = parseInt(limit);
   const assigned = fd.get("assigned_to");
   if (assigned) body.assigned_to = assigned;
-  await fetch(API + `/api/events/${currentEventId}/assign`, {
+  await authFetch(API + `/api/events/${currentEventId}/assign`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -549,7 +722,7 @@ document.getElementById("assign-form").onsubmit = async (e) => {
 async function loadWalkGroupEvents() {
   const sel = document.getElementById("wg-event-select");
   try {
-    const r = await fetch(API + "/api/events/");
+    const r = await authFetch(API + "/api/events/");
     if (!r.ok) { sel.innerHTML = '<option value="">Failed to load events</option>'; return; }
     const events = await r.json();
     if (!events.length) {
@@ -579,7 +752,7 @@ document.getElementById("walk-group-form").onsubmit = async (e) => {
   e.preventDefault();
   if (!currentEventId) { alert("Select an event first."); return; }
   // Check if event already has houses assigned — warn before overwriting
-  const existing = await fetch(API + `/api/events/${currentEventId}/houses`);
+  const existing = await authFetch(API + `/api/events/${currentEventId}/houses`);
   const existingHouses = await existing.json();
   if (existingHouses.length > 0) {
     if (!confirm(`This event already has ${existingHouses.length} houses assigned.\n\nGenerating walk groups will reassign group labels for overlapping houses.\n\nContinue?`)) return;
@@ -595,7 +768,7 @@ document.getElementById("walk-group-form").onsubmit = async (e) => {
   resultEl.classList.remove("hidden");
   resultEl.textContent = "Generating groups…";
   try {
-    const r = await fetch(API + `/api/events/${currentEventId}/walk-groups`, {
+    const r = await authFetch(API + `/api/events/${currentEventId}/walk-groups`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -619,7 +792,7 @@ async function loadWalkGroupList() {
   const el = document.getElementById("wg-groups-list");
   el.innerHTML = '<p class="loading-text">Loading groups…</p>';
   try {
-    const r = await fetch(API + `/api/events/${currentEventId}/houses`);
+    const r = await authFetch(API + `/api/events/${currentEventId}/houses`);
     if (!r.ok) {
       el.innerHTML = `<p>Failed to load groups (HTTP ${r.status}).</p>`;
       return;
@@ -666,7 +839,7 @@ let _visitRosterLoaded = false;
 async function loadVisitRoster() {
   const sel = document.getElementById("visit-volunteer-select");
   try {
-    const r = await fetch(API + "/api/scout/roster?active_only=true");
+    const r = await authFetch(API + "/api/scout/roster?active_only=true");
     const roster = await r.json();
     sel.innerHTML = '<option value="">Select volunteer...</option>' +
       roster.map(s => `<option value="${s.name}">${s.name}${s.scout_id ? " (" + s.scout_id + ")" : ""}</option>`).join("") +
@@ -726,7 +899,7 @@ document.getElementById("visit-form").onsubmit = async (e) => {
     former_scout: toBool(fd.get("former_scout")),
     avoid_house: !!fd.get("avoid_house"),
   };
-  await fetch(API + `/api/events/${eventId}/houses/${ehId}/visits`, {
+  await authFetch(API + `/api/events/${eventId}/houses/${ehId}/visits`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -753,7 +926,7 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
   document.getElementById("arcgis-progress").classList.remove("hidden");
   document.getElementById("arcgis-status").textContent = "connecting…";
   try {
-    const r = await fetch(API + "/api/arcgis/fetch", {
+    const r = await authFetch(API + "/api/arcgis/fetch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -782,7 +955,7 @@ document.getElementById("import-form").onsubmit = async (e) => {
   document.getElementById("import-progress").classList.remove("hidden");
   document.getElementById("import-status").textContent = "uploading…";
   try {
-    const r = await fetch(API + "/api/imports/", { method: "POST", body: fd });
+    const r = await authFetch(API + "/api/imports/", { method: "POST", body: fd });
     const data = await r.json();
     if (r.ok) {
       document.getElementById("import-status").textContent =
@@ -807,7 +980,7 @@ function importTitle(i) {
 }
 
 async function loadImports() {
-  const r = await fetch(API + "/api/imports/");
+  const r = await authFetch(API + "/api/imports/");
   const imports = await r.json();
   document.getElementById("imports-list").innerHTML = imports.length
     ? `<table><tr><th>Import</th><th>Records</th><th>Status</th><th>Date</th><th></th></tr>` +
@@ -823,7 +996,7 @@ async function loadImports() {
 
 async function deleteImport(id) {
   if (!confirm("Delete this import and its records?")) return;
-  const r = await fetch(API + "/api/imports/" + id, { method: "DELETE" });
+  const r = await authFetch(API + "/api/imports/" + id, { method: "DELETE" });
   const data = await r.json();
   if (r.ok) {
     alert(`Deleted. ${data.houses_removed} house(s) removed, ${data.houses_kept} kept.`);
@@ -835,7 +1008,7 @@ async function deleteImport(id) {
 }
 
 async function loadUnmatched() {
-  const r = await fetch(API + "/api/imports/unmatched/");
+  const r = await authFetch(API + "/api/imports/unmatched/");
   const records = await r.json();
   document.getElementById("unmatched-list").innerHTML = records.length
     ? `<table><tr><th>Source</th><th>Address</th><th>Status</th></tr>` +
@@ -854,7 +1027,7 @@ async function loadHouses() {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (zip) params.set("zip_code", zip);
-  const r = await fetch(API + "/api/houses/?" + params);
+  const r = await authFetch(API + "/api/houses/?" + params);
   const houses = await r.json();
   document.getElementById("houses-list").innerHTML = houses.length
     ? `<table><tr><th>Address</th><th>City</th><th>ZIP</th><th>Owner</th><th>Source</th></tr>` +
@@ -874,7 +1047,7 @@ async function exportHousesCSV() {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (zip) params.set("zip_code", zip);
-  const r = await fetch(API + "/api/houses/?" + params);
+  const r = await authFetch(API + "/api/houses/?" + params);
   const houses = await r.json();
   if (!houses.length) { alert("No houses to export."); return; }
   exportCSV("houses.csv",
@@ -896,7 +1069,7 @@ document.getElementById("manual-house-form").onsubmit = async (e) => {
     latitude: fd.get("latitude") ? parseFloat(fd.get("latitude")) : undefined,
     longitude: fd.get("longitude") ? parseFloat(fd.get("longitude")) : undefined,
   };
-  const r = await fetch(API + "/api/houses/", {
+  const r = await authFetch(API + "/api/houses/", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -906,7 +1079,7 @@ document.getElementById("manual-house-form").onsubmit = async (e) => {
 
 // --- Roster ---
 async function loadRoster() {
-  const r = await fetch(API + "/api/scout/roster");
+  const r = await authFetch(API + "/api/scout/roster");
   const roster = await r.json();
   document.getElementById("roster-list").innerHTML = roster.length
     ? `<table><tr><th>Name</th><th>Scout ID</th><th>Status</th><th></th></tr>` +
@@ -924,7 +1097,7 @@ async function loadRoster() {
 document.getElementById("roster-form").onsubmit = async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
-  await fetch(API + "/api/scout/roster", {
+  await authFetch(API + "/api/scout/roster", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: fd.get("name"), scout_id: fd.get("scout_id") || null }),
   });
@@ -933,19 +1106,19 @@ document.getElementById("roster-form").onsubmit = async (e) => {
   _visitRosterLoaded = false;
 };
 async function toggleRosterScout(id) {
-  await fetch(API + "/api/scout/roster/" + id, { method: "PATCH" });
+  await authFetch(API + "/api/scout/roster/" + id, { method: "PATCH" });
   loadRoster();
   _visitRosterLoaded = false;
 }
 async function deleteRosterScout(id) {
   if (!confirm("Remove this scout from the roster?")) return;
-  await fetch(API + "/api/scout/roster/" + id, { method: "DELETE" });
+  await authFetch(API + "/api/scout/roster/" + id, { method: "DELETE" });
   loadRoster();
   _visitRosterLoaded = false;
 }
 
 async function exportRosterCSV() {
-  const r = await fetch(API + "/api/scout/roster");
+  const r = await authFetch(API + "/api/scout/roster");
   const roster = await r.json();
   if (!roster.length) { alert("No scouts to export."); return; }
   exportCSV("scout-roster.csv",
@@ -961,7 +1134,7 @@ document.getElementById("roster-import-form").onsubmit = async (e) => {
   statusEl.classList.remove("hidden");
   statusEl.textContent = "Importing…";
   try {
-    const r = await fetch(API + "/api/scout/roster/import", { method: "POST", body: fd });
+    const r = await authFetch(API + "/api/scout/roster/import", { method: "POST", body: fd });
     const data = await r.json();
     if (r.ok) {
       statusEl.textContent = `Done! ${data.added} scout(s) added, ${data.skipped} skipped (duplicates or empty).`;
@@ -979,7 +1152,7 @@ document.getElementById("roster-import-form").onsubmit = async (e) => {
 // --- Scout Data ---
 async function loadScoutDataEvents() {
   const sel = document.getElementById("sd-event-filter");
-  const r = await fetch(API + "/api/events/");
+  const r = await authFetch(API + "/api/events/");
   const events = await r.json();
   sel.innerHTML = '<option value="">All Events</option>' +
     events.map(e => `<option value="${e.id}">${e.name}</option>`).join("");
@@ -991,8 +1164,8 @@ async function loadScoutData() {
   const params = eventId ? "?event_id=" + eventId : "";
 
   const [dataR, summaryR] = await Promise.all([
-    fetch(API + "/api/scout/data" + params),
-    fetch(API + "/api/scout/data/summary" + params),
+    authFetch(API + "/api/scout/data" + params),
+    authFetch(API + "/api/scout/data/summary" + params),
   ]);
   const data = await dataR.json();
   const summary = await summaryR.json();
@@ -1055,4 +1228,6 @@ function exportScoutDataCSV() {
 }
 
 // --- Init ---
-loadDashboard();
+_checkAuth().then(() => {
+  if (_authToken) loadDashboard();
+});

@@ -9,6 +9,104 @@ let formState = { door: null, donation: null, former: null };
 let rosterData = [];
 let eventsData = [];
 
+// --- Auth ---
+let _authToken = localStorage.getItem("scoutmap_token") || "";
+
+function authFetch(url, opts = {}) {
+  opts.headers = opts.headers || {};
+  if (_authToken) opts.headers["Authorization"] = "Bearer " + _authToken;
+  return fetch(url, opts);
+}
+
+async function _checkAuth() {
+  if (!_authToken) { _showLoginOverlay(); return; }
+  try {
+    const r = await authFetch(API + "/api/auth/me");
+    if (r.ok) { _hideLoginOverlay(); }
+    else { _authToken = ""; localStorage.removeItem("scoutmap_token"); _showLoginOverlay(); }
+  } catch { _showLoginOverlay(); }
+}
+
+function _showLoginOverlay() {
+  document.getElementById("login-overlay").classList.add("active");
+  document.querySelector("header").style.display = "none";
+  document.querySelector(".container").style.display = "none";
+}
+function _hideLoginOverlay() {
+  document.getElementById("login-overlay").classList.remove("active");
+  document.querySelector("header").style.display = "";
+  document.querySelector(".container").style.display = "";
+}
+
+async function scoutLoginRequestCode() {
+  const email = document.getElementById("login-email").value.trim();
+  const errEl = document.getElementById("login-email-error");
+  errEl.style.display = "none";
+  if (!email || !email.includes("@")) { errEl.textContent = "Enter a valid email."; errEl.style.display = ""; return; }
+
+  const btn = document.getElementById("login-send-btn");
+  btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    const r = await fetch(API + "/api/auth/request-code", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    if (r.ok) {
+      document.getElementById("login-code-email").textContent = email;
+      document.getElementById("login-step-email").style.display = "none";
+      document.getElementById("login-step-code").style.display = "";
+      document.getElementById("login-code").focus();
+    } else {
+      const data = await r.json();
+      errEl.textContent = data.detail || "Error"; errEl.style.display = "";
+    }
+  } catch (err) {
+    errEl.textContent = "Network error: " + err.message; errEl.style.display = "";
+  }
+  btn.disabled = false; btn.textContent = "Send Login Code";
+}
+
+async function scoutLoginVerifyCode() {
+  const email = document.getElementById("login-code-email").textContent;
+  const code = document.getElementById("login-code").value.trim();
+  const errEl = document.getElementById("login-code-error");
+  errEl.style.display = "none";
+  if (!code || code.length < 6) { errEl.textContent = "Enter the 6-digit code."; errEl.style.display = ""; return; }
+
+  const btn = document.getElementById("login-verify-btn");
+  btn.disabled = true; btn.textContent = "Verifying…";
+  try {
+    const r = await fetch(API + "/api/auth/verify-code", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code }),
+    });
+    const data = await r.json();
+    if (r.ok && data.token) {
+      _authToken = data.token;
+      localStorage.setItem("scoutmap_token", _authToken);
+      _hideLoginOverlay();
+      loadRoster(); loadEvents();
+    } else {
+      errEl.textContent = data.detail || "Invalid or expired code."; errEl.style.display = "";
+    }
+  } catch (err) {
+    errEl.textContent = "Network error: " + err.message; errEl.style.display = "";
+  }
+  btn.disabled = false; btn.textContent = "Verify Code";
+}
+
+function scoutLoginBackToEmail() {
+  document.getElementById("login-step-email").style.display = "";
+  document.getElementById("login-step-code").style.display = "none";
+}
+
+document.getElementById("login-email").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); scoutLoginRequestCode(); }
+});
+document.getElementById("login-code").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); scoutLoginVerifyCode(); }
+});
+
 // --- Screen management ---
 function showScreen(id) {
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -57,6 +155,10 @@ function saveScoutInfo() {
 
 // --- Logout ---
 function scoutLogout() {
+  // Clear auth session
+  try { authFetch(API + "/api/auth/logout", { method: "POST" }); } catch { /* ok */ }
+  _authToken = "";
+  localStorage.removeItem("scoutmap_token");
   localStorage.removeItem("scoutmap_scout");
   scoutName = "";
   scoutIdNum = "";
@@ -71,7 +173,7 @@ function scoutLogout() {
   document.getElementById("group-select").innerHTML = '<option value="">Select event first</option>';
   updateBadge();
   checkReady();
-  showScreen("setup-screen");
+  _showLoginOverlay();
 }
 
 function backToSetup() {
@@ -82,7 +184,7 @@ function backToSetup() {
 async function loadRoster() {
   const sel = document.getElementById("scout-select");
   try {
-    const r = await fetch(API + "/api/scout/roster?active_only=true");
+    const r = await authFetch(API + "/api/scout/roster?active_only=true");
     rosterData = await r.json();
   } catch {
     rosterData = [];
@@ -126,7 +228,7 @@ document.getElementById("other-name").oninput = checkReady;
 async function loadEvents() {
   const sel = document.getElementById("event-select");
   try {
-    const r = await fetch(API + "/api/scout/events");
+    const r = await authFetch(API + "/api/scout/events");
     eventsData = await r.json();
     if (!eventsData.length) {
       sel.innerHTML = '<option value="">No events available</option>';
@@ -202,7 +304,7 @@ document.getElementById("start-btn").onclick = async () => {
 
   try {
     const params = new URLSearchParams({ group: selectedGroupLabel });
-    const r = await fetch(API + `/api/scout/events/${selectedEventId}/houses?${params}`);
+    const r = await authFetch(API + `/api/scout/events/${selectedEventId}/houses?${params}`);
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
       throw new Error(data.detail || `Server error (${r.status})`);
@@ -340,7 +442,7 @@ async function saveVisit() {
   };
 
   try {
-    const r = await fetch(API + `/api/events/${h.event_id}/houses/${h.event_house_id}/visits`, {
+    const r = await authFetch(API + `/api/events/${h.event_id}/houses/${h.event_house_id}/visits`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -370,6 +472,10 @@ async function saveVisit() {
 }
 
 // --- Init ---
-restoreScoutInfo();
-loadRoster();
-loadEvents();
+_checkAuth().then(() => {
+  if (_authToken) {
+    restoreScoutInfo();
+    loadRoster();
+    loadEvents();
+  }
+});

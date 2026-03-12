@@ -201,3 +201,35 @@ class ScoutRoster(Base):
     scout_id = Column(String(100))
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Auth – email allowlist, OTP codes, sessions
+# ---------------------------------------------------------------------------
+class AllowedEmail(Base):
+    __tablename__ = "allowed_emails"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(320), nullable=False, unique=True)  # exact or wildcard like "*@example.com"
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AuthCode(Base):
+    __tablename__ = "auth_codes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(320), nullable=False, index=True)
+    code = Column(String(6), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    token = Column(String(64), nullable=False, unique=True, index=True)
+    email = Column(String(320), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
