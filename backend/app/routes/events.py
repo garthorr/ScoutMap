@@ -299,6 +299,138 @@ def _addr_sort_key(addr_num: str | None) -> int:
     return int(digits) if digits else 0
 
 
+# ---------------------------------------------------------------------------
+# Duplicate event (copies all house assignments, not visits)
+# ---------------------------------------------------------------------------
+@router.post("/{event_id}/duplicate")
+def duplicate_event(
+    event_id: str,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Event not found")
+
+    new_event = FundraiserEvent(
+        name=f"{event.name} (Copy)",
+        description=event.description,
+        event_date=event.event_date,
+    )
+    db.add(new_event)
+    db.flush()
+
+    # Copy house assignments
+    ehs = db.query(EventHouse).filter(EventHouse.event_id == event_id).all()
+    for eh in ehs:
+        db.add(EventHouse(
+            event_id=new_event.id,
+            house_id=eh.house_id,
+            assigned_to=eh.assigned_to,
+            priority=eh.priority,
+        ))
+    db.commit()
+    return {"ok": True, "new_event_id": str(new_event.id), "name": new_event.name, "houses_copied": len(ehs)}
+
+
+# ---------------------------------------------------------------------------
+# Walk group manipulation
+# ---------------------------------------------------------------------------
+class ReassignGroupBody(BaseModel):
+    old_label: str
+    new_label: str
+
+
+@router.put("/{event_id}/groups/reassign")
+def reassign_group(
+    event_id: str,
+    body: ReassignGroupBody,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Rename a walk group label."""
+    updated = db.query(EventHouse).filter(
+        EventHouse.event_id == event_id,
+        EventHouse.assigned_to == body.old_label,
+    ).update({"assigned_to": body.new_label}, synchronize_session=False)
+    db.commit()
+    return {"ok": True, "updated": updated}
+
+
+class MergeGroupsBody(BaseModel):
+    source_labels: list[str]
+    target_label: str
+
+
+@router.put("/{event_id}/groups/merge")
+def merge_groups(
+    event_id: str,
+    body: MergeGroupsBody,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Merge multiple walk groups into one."""
+    updated = db.query(EventHouse).filter(
+        EventHouse.event_id == event_id,
+        EventHouse.assigned_to.in_(body.source_labels),
+    ).update({"assigned_to": body.target_label}, synchronize_session=False)
+    db.commit()
+    return {"ok": True, "updated": updated}
+
+
+class DeleteGroupBody(BaseModel):
+    label: str
+
+
+@router.delete("/{event_id}/groups")
+def delete_group(
+    event_id: str,
+    label: str = Query(...),
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Remove all house assignments for a walk group."""
+    ehs = db.query(EventHouse).filter(
+        EventHouse.event_id == event_id,
+        EventHouse.assigned_to == label,
+    ).all()
+    eh_ids = [eh.id for eh in ehs]
+    if eh_ids:
+        db.query(Visit).filter(Visit.event_house_id.in_(eh_ids)).delete(synchronize_session=False)
+    db.query(EventHouse).filter(
+        EventHouse.event_id == event_id,
+        EventHouse.assigned_to == label,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True, "removed": len(ehs)}
+
+
+class RemoveEventHousesBody(BaseModel):
+    event_house_ids: list[str]
+
+
+@router.post("/{event_id}/houses/remove")
+def remove_event_houses(
+    event_id: str,
+    body: RemoveEventHousesBody,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Remove specific houses from an event (unassign them)."""
+    deleted = 0
+    for ehid in body.event_house_ids:
+        eh = db.query(EventHouse).filter(
+            EventHouse.id == ehid,
+            EventHouse.event_id == event_id,
+        ).first()
+        if eh:
+            db.query(Visit).filter(Visit.event_house_id == eh.id).delete(synchronize_session=False)
+            db.delete(eh)
+            deleted += 1
+    db.commit()
+    return {"ok": True, "removed": deleted}
+
+
 @router.get("/{event_id}/houses", response_model=list[EventHouseOut])
 def list_event_houses(
     event_id: str,
