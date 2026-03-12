@@ -1,4 +1,8 @@
 const API = "";
+function esc(s) {
+  if (s == null) return "";
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 let scoutName = "";
 let scoutIdNum = "";
 let selectedEventId = "";
@@ -51,7 +55,7 @@ async function _loadLoginRoster() {
   }
   if (_loginRoster.length) {
     sel.innerHTML = '<option value="">Select your name...</option>' +
-      _loginRoster.map(s => `<option value="${s.id}">${s.name}${s.scout_id ? " (" + s.scout_id + ")" : ""}</option>`).join("");
+      _loginRoster.map(s => `<option value="${esc(s.id)}">${esc(s.name)}${s.scout_id ? " (" + esc(s.scout_id) + ")" : ""}</option>`).join("");
   } else {
     sel.innerHTML = '<option value="">No scouts available</option>';
   }
@@ -224,7 +228,7 @@ async function loadRoster() {
   }
 
   sel.innerHTML = '<option value="">Select your name...</option>' +
-    rosterData.map(s => `<option value="${s.id}">${s.name}${s.scout_id ? " (" + s.scout_id + ")" : ""}</option>`).join("") +
+    rosterData.map(s => `<option value="${esc(s.id)}">${esc(s.name)}${s.scout_id ? " (" + esc(s.scout_id) + ")" : ""}</option>`).join("") +
     '<option value="__other__">Other (write in)</option>';
 
   // Restore previous selection
@@ -268,7 +272,7 @@ async function loadEvents() {
       return;
     }
     sel.innerHTML = '<option value="">Select an event...</option>' +
-      eventsData.map(ev => `<option value="${ev.id}">${ev.name}</option>`).join("");
+      eventsData.map(ev => `<option value="${esc(ev.id)}">${esc(ev.name)}</option>`).join("");
   } catch {
     sel.innerHTML = '<option value="">Failed to load</option>';
   }
@@ -385,8 +389,8 @@ function renderHouseList() {
     return `<div class="house-item" onclick="openHouseForm(${idx})">
       <div class="house-num ${numClass}">${idx + 1}</div>
       <div class="house-details">
-        <div class="house-addr">${h.address}</div>
-        <div class="house-status">${statusText}</div>
+        <div class="house-addr">${esc(h.address)}</div>
+        <div class="house-status">${esc(statusText)}</div>
       </div>
       <div class="house-arrow">&rsaquo;</div>
     </div>`;

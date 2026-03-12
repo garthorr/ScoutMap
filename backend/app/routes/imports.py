@@ -13,6 +13,7 @@ from sqlalchemy import func
 from app.database import get_db
 from app.models import SourceImport, UnmatchedRecord, HouseSourceLink, MasterHouse, EventHouse
 from app.schemas import SourceImportOut, UnmatchedRecordOut
+from app.routes.auth import require_admin
 from app.importers import get_importer
 
 # Ensure importers are registered
@@ -30,6 +31,7 @@ async def create_import(
     source_name: str = Form(...),
     file: UploadFile = File(...),
     notes: str = Form(None),
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     importer = get_importer(source_name)
@@ -82,7 +84,7 @@ def get_import(import_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{import_id}")
-def delete_import(import_id: str, db: Session = Depends(get_db)):
+def delete_import(import_id: str, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Delete an import and its associated records.
 
     Houses that were ONLY linked to this import (and aren't manually created

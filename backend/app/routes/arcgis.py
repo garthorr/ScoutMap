@@ -25,6 +25,7 @@ from typing import Optional
 from app.database import get_db
 from app.models import MasterHouse, HouseSourceLink, SourceImport, UnmatchedRecord
 from app.address import normalize_address, parse_address_parts
+from app.routes.auth import require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -59,18 +60,21 @@ class ArcGISFetchRequest(BaseModel):
 
 def _build_where(req: ArcGISFetchRequest) -> str:
     """Build ArcGIS WHERE clause. TAXPAZIP is 9 digits, so use LIKE for 5-digit input."""
+    import re
     clauses = []
     if req.zip_codes:
         parts = []
         for z in req.zip_codes:
-            z = z.strip()
+            z = re.sub(r"[^0-9]", "", z.strip())  # sanitize: digits only
+            if not z:
+                continue
             if len(z) == 5:
                 parts.append(f"TAXPAZIP LIKE '{z}%'")
             else:
                 parts.append(f"TAXPAZIP = '{z}'")
         if len(parts) == 1:
             clauses.append(parts[0])
-        else:
+        elif parts:
             clauses.append("(" + " OR ".join(parts) + ")")
     return " AND ".join(clauses) if clauses else "1=1"
 
@@ -233,7 +237,7 @@ async def test_arcgis_connection():
 
 
 @router.post("/fetch")
-async def fetch_arcgis_parcels(req: ArcGISFetchRequest, db: Session = Depends(get_db)):
+async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Fetch tax parcels from Dallas ArcGIS and import into the database."""
     where = _build_where(req)
     bbox = None

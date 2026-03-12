@@ -14,7 +14,7 @@ from app.database import get_db
 from app.models import (
     FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster,
 )
-from app.routes.auth import _hash_password
+from app.routes.auth import _hash_password, require_admin
 
 router = APIRouter(prefix="/api/scout", tags=["scout"])
 
@@ -51,7 +51,7 @@ def list_roster(active_only: bool = False, db: Session = Depends(get_db)):
 
 
 @router.post("/roster", response_model=RosterOut)
-def add_scout(body: RosterCreate, db: Session = Depends(get_db)):
+def add_scout(body: RosterCreate, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     s = ScoutRoster(name=body.name, scout_id=body.scout_id)
     db.add(s)
     db.commit()
@@ -60,7 +60,7 @@ def add_scout(body: RosterCreate, db: Session = Depends(get_db)):
 
 
 @router.delete("/roster/{roster_id}")
-def remove_scout(roster_id: str, db: Session = Depends(get_db)):
+def remove_scout(roster_id: str, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     s = db.query(ScoutRoster).filter(ScoutRoster.id == roster_id).first()
     if not s:
         raise HTTPException(404, "Scout not found")
@@ -70,7 +70,7 @@ def remove_scout(roster_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/roster/import")
-async def import_roster_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def import_roster_csv(file: UploadFile = File(...), _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Import scouts from a CSV file.
 
     Expected columns (header row required):
@@ -124,7 +124,7 @@ async def import_roster_csv(file: UploadFile = File(...), db: Session = Depends(
 
 
 @router.patch("/roster/{roster_id}")
-def toggle_scout(roster_id: str, db: Session = Depends(get_db)):
+def toggle_scout(roster_id: str, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     s = db.query(ScoutRoster).filter(ScoutRoster.id == roster_id).first()
     if not s:
         raise HTTPException(404, "Scout not found")

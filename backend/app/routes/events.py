@@ -14,6 +14,7 @@ from app.schemas import (
     EventCreate, EventOut, EventAssignRequest,
     EventHouseOut, VisitCreate, VisitOut,
 )
+from app.routes.auth import require_admin
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -33,7 +34,7 @@ def _enrich_event(event: FundraiserEvent, db: Session) -> dict:
 
 
 @router.post("/", response_model=EventOut)
-def create_event(body: EventCreate, db: Session = Depends(get_db)):
+def create_event(body: EventCreate, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     event = FundraiserEvent(
         name=body.name,
         description=body.description,
@@ -78,7 +79,7 @@ def get_event(event_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{event_id}/assign", response_model=dict)
-def assign_houses(event_id: str, body: EventAssignRequest, db: Session = Depends(get_db)):
+def assign_houses(event_id: str, body: EventAssignRequest, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Generate event assignments from imported master houses."""
     event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
     if not event:
@@ -136,6 +137,7 @@ class WalkGroupRequest(BaseModel):
 def create_walk_groups(
     event_id: str,
     body: WalkGroupRequest,
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Auto-assign houses into walkable groups of adjacent addresses.
