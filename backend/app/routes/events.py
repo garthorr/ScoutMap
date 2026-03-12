@@ -182,9 +182,7 @@ def assign_houses(event_id: str, body: EventAssignRequest, _admin: str = Depends
 
 
 class WalkGroupRequest(BaseModel):
-    zip_code: str
     group_size: int = 20                          # houses per group
-    street_names: Optional[list[str]] = None      # optional filter
 
 
 @router.post("/{event_id}/walk-groups")
@@ -194,96 +192,74 @@ def create_walk_groups(
     _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Auto-assign houses into walkable groups of adjacent addresses.
+    """Auto-assign houses already in this event into walkable groups.
 
-    Groups houses by street name, sorts by address number so scouts walk
+    Uses the houses already assigned to the event (EventHouse rows).
+    Groups by street name, sorts by address number so scouts walk
     in order, then splits each street into chunks of ``group_size``.
-    Each chunk becomes a numbered group.
+    Each chunk becomes a numbered group label.
     """
     event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
     if not event:
         raise HTTPException(404, "Event not found")
 
-    # Fetch candidate houses with coordinates in this ZIP
-    q = db.query(MasterHouse).filter(
-        MasterHouse.zip_code == body.zip_code.strip(),
-        MasterHouse.latitude.isnot(None),
-        MasterHouse.longitude.isnot(None),
-        MasterHouse.street_name.isnot(None),
+    # Fetch all EventHouse rows for this event, joined with MasterHouse
+    event_houses = (
+        db.query(EventHouse)
+        .join(MasterHouse, EventHouse.house_id == MasterHouse.id)
+        .filter(
+            EventHouse.event_id == event.id,
+            MasterHouse.street_name.isnot(None),
+        )
+        .all()
     )
-    if body.street_names:
-        patterns = [
-            MasterHouse.street_name.ilike(f"%{s.strip()}%")
-            for s in body.street_names
-        ]
-        q = q.filter(or_(*patterns))
 
-    houses = q.all()
-    if not houses:
-        return {"groups": [], "total_assigned": 0, "message": "No houses found for that ZIP/filter."}
+    if not event_houses:
+        return {"groups": [], "total_assigned": 0, "message": "No houses assigned to this event yet. Assign houses first."}
+
+    # Build a map of house_id -> MasterHouse for street/address info
+    house_ids = [eh.house_id for eh in event_houses]
+    houses_by_id = {}
+    for h in db.query(MasterHouse).filter(MasterHouse.id.in_(house_ids)).all():
+        houses_by_id[h.id] = h
 
     # Group by street, sort within each street by address number
-    by_street: dict[str, list[MasterHouse]] = defaultdict(list)
-    for h in houses:
-        street = (h.street_name or "UNKNOWN").upper().strip()
-        by_street[street].append(h)
+    by_street: dict[str, list] = defaultdict(list)
+    for eh in event_houses:
+        h = houses_by_id.get(eh.house_id)
+        if not h or not h.street_name:
+            continue
+        street = h.street_name.upper().strip()
+        by_street[street].append({"eh": eh, "house": h})
 
     for street in by_street:
-        by_street[street].sort(key=lambda h: _addr_sort_key(h.address_number))
+        by_street[street].sort(key=lambda x: _addr_sort_key(x["house"].address_number))
 
     # Build groups: chunk each street into group_size, label them
     groups = []
     group_num = 1
-    # Sort streets alphabetically for consistent ordering
     for street in sorted(by_street.keys()):
-        street_houses = by_street[street]
-        for i in range(0, len(street_houses), body.group_size):
-            chunk = street_houses[i:i + body.group_size]
-            # Range label like "5700-5800 Portsmouth Ln"
-            first_num = chunk[0].address_number or "?"
-            last_num = chunk[-1].address_number or "?"
+        street_items = by_street[street]
+        for i in range(0, len(street_items), body.group_size):
+            chunk = street_items[i:i + body.group_size]
+            first_num = chunk[0]["house"].address_number or "?"
+            last_num = chunk[-1]["house"].address_number or "?"
             if first_num == last_num:
                 label = f"Group {group_num} — {first_num} {street}"
             else:
                 label = f"Group {group_num} — {first_num}-{last_num} {street}"
-            groups.append({"label": label, "house_ids": [h.id for h in chunk]})
+            groups.append({"label": label, "event_houses": [x["eh"] for x in chunk]})
             group_num += 1
 
-    # Batch-fetch existing EventHouse rows for this event
-    all_house_ids = [hid for g in groups for hid in g["house_ids"]]
-    existing_map = {}
-    if all_house_ids:
-        for eh in (
-            db.query(EventHouse)
-            .filter(EventHouse.event_id == event.id, EventHouse.house_id.in_(all_house_ids))
-            .all()
-        ):
-            existing_map[eh.house_id] = eh
-
-    # Create EventHouse rows
-    total_assigned = 0
+    # Update group labels on existing EventHouse rows
     group_summaries = []
     for g in groups:
-        added = 0
-        for house_id in g["house_ids"]:
-            existing = existing_map.get(house_id)
-            if not existing:
-                new_eh = EventHouse(
-                    event_id=event.id,
-                    house_id=house_id,
-                    assigned_to=g["label"],
-                )
-                db.add(new_eh)
-                existing_map[house_id] = new_eh
-                added += 1
-            else:
-                # Update group label for already-assigned houses
-                existing.assigned_to = g["label"]
-        total_assigned += added
-        group_summaries.append({"label": g["label"], "houses": len(g["house_ids"]), "new": added})
+        for eh in g["event_houses"]:
+            eh.assigned_to = g["label"]
+        group_summaries.append({"label": g["label"], "houses": len(g["event_houses"])})
 
     db.commit()
-    return {"groups": group_summaries, "total_assigned": total_assigned}
+    return {"groups": group_summaries, "total_assigned": len(event_houses)}
 
 
 def _addr_sort_key(addr_num: str | None) -> int:

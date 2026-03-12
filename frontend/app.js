@@ -779,15 +779,15 @@ function _highlightSelectedStreets() {
 function copySelectedStreets() {
   if (!_selectedStreets.size) { alert("No streets selected."); return; }
   const streetStr = [..._selectedStreets].sort().join(", ");
-  // Fill into the walk group form
-  const wgStreetInput = document.querySelector('#walk-group-form [name="street_names"]');
-  const wgZipInput = document.querySelector('#walk-group-form [name="zip_code"]');
-  if (wgStreetInput) wgStreetInput.value = streetStr;
-  if (wgZipInput && document.getElementById("map-zip").value) {
-    wgZipInput.value = document.getElementById("map-zip").value;
+  // Fill into the manual assign form street_names field
+  const assignStreetInput = document.querySelector('#assign-form [name="street_names"]');
+  const assignZipInput = document.querySelector('#assign-form [name="zip_codes"]');
+  if (assignStreetInput) assignStreetInput.value = streetStr;
+  if (assignZipInput && document.getElementById("map-zip").value) {
+    assignZipInput.value = document.getElementById("map-zip").value;
   }
-  showPage("walk-groups");
-  alert(`${_selectedStreets.size} street(s) copied to Walk Groups form.`);
+  showPage("events");
+  alert(`${_selectedStreets.size} street(s) copied to the assign form. Open an event to assign them.`);
 }
 
 // --- Map tools: erase, add, box-select ---
@@ -1398,19 +1398,11 @@ document.getElementById("wg-event-select").onchange = (e) => {
 document.getElementById("walk-group-form").onsubmit = async (e) => {
   e.preventDefault();
   if (!currentEventId) { alert("Select an event first."); return; }
-  // Check if event already has houses assigned — warn before overwriting
-  const existing = await authFetch(API + `/api/events/${currentEventId}/houses`);
-  const existingHouses = await existing.json();
-  if (existingHouses.length > 0) {
-    if (!confirm(`This event already has ${existingHouses.length} houses assigned.\n\nGenerating walk groups will reassign group labels for overlapping houses.\n\nContinue?`)) return;
-  }
+  if (!confirm("This will organize all houses assigned to this event into walk groups by street.\n\nExisting group labels will be overwritten.\n\nContinue?")) return;
   const fd = new FormData(e.target);
   const body = {
-    zip_code: fd.get("zip_code"),
     group_size: parseInt(fd.get("group_size") || "20"),
   };
-  const streets = fd.get("street_names");
-  if (streets) body.street_names = streets.split(",").map(s => s.trim()).filter(Boolean);
   const resultEl = document.getElementById("walk-group-result");
   resultEl.classList.remove("hidden");
   resultEl.textContent = "Generating groups…";
@@ -1421,11 +1413,11 @@ document.getElementById("walk-group-form").onsubmit = async (e) => {
     });
     const data = await r.json();
     if (r.ok && data.groups?.length) {
-      resultEl.innerHTML = `<strong>${data.groups.length} groups created (${data.total_assigned} new houses assigned)</strong>` +
+      resultEl.innerHTML = `<strong>${data.groups.length} groups created (${data.total_assigned} houses)</strong>` +
         `<ul>` + data.groups.map(g => `<li>${g.label} — ${g.houses} houses</li>`).join("") + `</ul>`;
       loadWalkGroupList();
     } else if (r.ok) {
-      resultEl.textContent = data.message || "No houses found.";
+      resultEl.textContent = data.message || "No houses assigned to this event yet.";
     } else {
       resultEl.textContent = "Error: " + (data.detail || JSON.stringify(data));
     }
