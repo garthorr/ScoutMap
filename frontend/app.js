@@ -372,6 +372,7 @@ function initMap() {
     }).addTo(map);
 
     map.on("moveend", refreshMapDots);
+    map.on("click", _handleMapToolClick);
     refreshMapDots();
     _loadMapEventSelect();
   }, 100);
@@ -396,6 +397,7 @@ async function refreshMapDots() {
     });
     dot.bindPopup(`<b>${h.full_address}</b><br>${h.owner_name || ""}<br>` +
       (h.total_appraised_value ? `Appraised: $${h.total_appraised_value.toLocaleString()}` : ""));
+    _setupEraseOnDot(dot, h.id, h.full_address);
     houseDotLayer.addLayer(dot);
   });
 }
@@ -661,6 +663,177 @@ function copySelectedStreets() {
   }
   showPage("walk-groups");
   alert(`${_selectedStreets.size} street(s) copied to Walk Groups form.`);
+}
+
+// --- Map tools: erase & add ---
+let _mapTool = "pointer";       // "pointer" | "erase" | "add"
+let _eraseMarked = new Map();   // house_id -> L.marker (X markers for pending deletes)
+let _addMarker = null;          // temp marker for add mode
+
+function setMapTool(tool) {
+  // Clean up previous tool state
+  if (_mapTool === "erase" && tool !== "erase") cancelErase();
+  if (_mapTool === "add" && tool !== "add" && _addMarker) {
+    map.removeLayer(_addMarker); _addMarker = null;
+  }
+
+  _mapTool = tool;
+  document.querySelectorAll(".map-tool").forEach(b => b.classList.remove("active"));
+  document.getElementById("map-tool-" + tool).classList.add("active");
+
+  const hint = document.getElementById("map-tool-hint");
+  const mapEl = document.getElementById("map");
+  if (tool === "erase") {
+    hint.textContent = "Click house dots to mark them for removal.";
+    mapEl.style.cursor = "crosshair";
+    map.dragging.disable();
+  } else if (tool === "add") {
+    hint.textContent = "Click on the map to place a new house.";
+    mapEl.style.cursor = "crosshair";
+    map.dragging.enable();
+  } else {
+    hint.textContent = "";
+    mapEl.style.cursor = "";
+    map.dragging.enable();
+  }
+}
+
+function _handleMapToolClick(e) {
+  if (_mapTool === "add") {
+    _placeAddMarker(e.latlng);
+  }
+}
+
+// --- Erase tool ---
+function _setupEraseOnDot(dot, houseId, address) {
+  dot.on("click", () => {
+    if (_mapTool !== "erase") return;
+    if (_eraseMarked.has(houseId)) {
+      // Unmark
+      map.removeLayer(_eraseMarked.get(houseId));
+      _eraseMarked.delete(houseId);
+    } else {
+      // Mark with red X
+      const xMarker = L.marker(dot.getLatLng(), {
+        icon: L.divIcon({
+          className: "",
+          html: '<div style="color:#CE1126;font-size:22px;font-weight:900;text-align:center;line-height:22px;text-shadow:0 0 3px #fff,0 0 3px #fff;">✕</div>',
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+        }),
+        interactive: false,
+      });
+      xMarker.addTo(map);
+      _eraseMarked.set(houseId, xMarker);
+    }
+    _updateErasePending();
+  });
+}
+
+function _updateErasePending() {
+  const el = document.getElementById("map-erase-pending");
+  const countEl = document.getElementById("map-erase-count");
+  if (_eraseMarked.size > 0) {
+    el.style.display = "";
+    countEl.textContent = _eraseMarked.size;
+  } else {
+    el.style.display = "none";
+  }
+}
+
+async function confirmEraseHouses() {
+  if (!_eraseMarked.size) return;
+  const ids = [..._eraseMarked.keys()];
+  if (!confirm(`Delete ${ids.length} house(s)? This cannot be undone.`)) return;
+
+  try {
+    const r = await authFetch(API + "/api/houses/batch-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ house_ids: ids }),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      // Remove X markers
+      _eraseMarked.forEach(m => map.removeLayer(m));
+      _eraseMarked.clear();
+      _updateErasePending();
+      refreshMapDots();
+    } else {
+      alert(data.detail || "Error deleting houses.");
+    }
+  } catch (err) {
+    alert("Network error: " + err.message);
+  }
+}
+
+function cancelErase() {
+  _eraseMarked.forEach(m => map.removeLayer(m));
+  _eraseMarked.clear();
+  _updateErasePending();
+}
+
+// --- Add tool ---
+function _placeAddMarker(latlng) {
+  if (_addMarker) map.removeLayer(_addMarker);
+  _addMarker = L.marker(latlng, {
+    icon: L.divIcon({
+      className: "",
+      html: '<div style="color:#059669;font-size:26px;font-weight:900;text-align:center;line-height:26px;text-shadow:0 0 3px #fff,0 0 3px #fff;">+</div>',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+    }),
+  }).addTo(map);
+
+  const popupHtml = `
+    <div style="min-width:220px;">
+      <div style="margin-bottom:6px;"><strong>Add House</strong></div>
+      <div style="margin-bottom:4px;">
+        <input id="add-house-address" placeholder="Full address" style="width:100%;padding:4px 6px;font-size:13px;border:1px solid #c5c5c5;border-radius:4px;" />
+      </div>
+      <div style="margin-bottom:4px;">
+        <input id="add-house-zip" placeholder="ZIP code" style="width:80px;padding:4px 6px;font-size:13px;border:1px solid #c5c5c5;border-radius:4px;" value="${document.getElementById("map-zip").value || ""}" />
+      </div>
+      <div style="font-size:11px;color:#888;margin-bottom:6px;">
+        ${latlng.lat.toFixed(6)}, ${latlng.lng.toFixed(6)}
+      </div>
+      <button onclick="saveAddHouse(${latlng.lat}, ${latlng.lng})" style="padding:4px 12px;font-size:13px;background:#059669;color:#fff;border:none;border-radius:4px;cursor:pointer;">Save</button>
+      <button onclick="cancelAddHouse()" style="padding:4px 12px;font-size:13px;background:#ccc;color:#333;border:none;border-radius:4px;cursor:pointer;margin-left:4px;">Cancel</button>
+    </div>
+  `;
+  _addMarker.bindPopup(popupHtml, { closeOnClick: false, autoClose: false }).openPopup();
+}
+
+async function saveAddHouse(lat, lng) {
+  const address = document.getElementById("add-house-address").value.trim();
+  const zip = document.getElementById("add-house-zip").value.trim();
+  if (!address) { alert("Enter an address."); return; }
+
+  try {
+    const r = await authFetch(API + "/api/houses/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        full_address: address,
+        zip_code: zip || null,
+        latitude: lat,
+        longitude: lng,
+      }),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      if (_addMarker) { map.removeLayer(_addMarker); _addMarker = null; }
+      refreshMapDots();
+    } else {
+      alert(data.detail || "Error adding house.");
+    }
+  } catch (err) {
+    alert("Network error: " + err.message);
+  }
+}
+
+function cancelAddHouse() {
+  if (_addMarker) { map.removeLayer(_addMarker); _addMarker = null; }
 }
 
 // --- Events ---

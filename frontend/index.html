@@ -84,6 +84,17 @@
         </div>
         <div id="map-selected-streets" style="margin-top:8px;font-size:13px;color:var(--sa-dark-blue);display:none;"></div>
       </div>
+      <div id="map-toolbar" style="margin-bottom:8px;display:flex;gap:6px;align-items:center;">
+        <button id="map-tool-pointer" class="btn-sm map-tool active" onclick="setMapTool('pointer')" title="Pan / select">Pointer</button>
+        <button id="map-tool-erase" class="btn-sm map-tool" onclick="setMapTool('erase')" title="Click houses to remove them" style="color:var(--sa-red);">Erase</button>
+        <button id="map-tool-add" class="btn-sm map-tool" onclick="setMapTool('add')" title="Click map to add a house" style="color:#059669;">Add</button>
+        <span id="map-tool-hint" style="font-size:13px;color:var(--sa-gray);margin-left:8px;"></span>
+        <span id="map-erase-pending" style="font-size:13px;color:var(--sa-red);margin-left:auto;display:none;">
+          <span id="map-erase-count">0</span> marked
+          <button class="btn-sm btn-danger" onclick="confirmEraseHouses()" style="margin-left:4px;">Delete</button>
+          <button class="btn-sm" onclick="cancelErase()" style="margin-left:2px;">Cancel</button>
+        </span>
+      </div>
       <div id="map" style="height:550px;border-radius:8px;"></div>
       <div id="map-street-list" class="card" style="margin-top:12px;display:none;">
         <h3>Streets <span id="map-street-filter-count" style="font-weight:400;color:var(--sa-gray);font-size:13px;"></span></h3>
