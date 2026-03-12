@@ -941,11 +941,11 @@ async function boxDeleteSelected() {
     max_lat: Math.max(...lats) + 0.0001,
     min_lon: Math.min(...lngs) - 0.0001,
     max_lon: Math.max(...lngs) + 0.0001,
-    limit: 5000,
+    limit: 2000,
   });
   try {
     const r = await authFetch(API + "/api/houses/map?" + params);
-    if (!r.ok) { alert("Failed to query houses."); return; }
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.detail || "Failed to query houses."); return; }
     const houses = await r.json();
     if (!Array.isArray(houses)) { alert("Unexpected response from server."); return; }
     // Match by proximity
@@ -999,12 +999,12 @@ async function boxAssignSelected() {
     max_lat: Math.max(...lats) + 0.0001,
     min_lon: Math.min(...lngs) - 0.0001,
     max_lon: Math.max(...lngs) + 0.0001,
-    limit: 5000,
+    limit: 2000,
   });
 
   try {
     const r = await authFetch(API + "/api/houses/map?" + params);
-    if (!r.ok) { alert("Failed to query houses."); return; }
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.detail || "Failed to query houses."); return; }
     const houses = await r.json();
     if (!Array.isArray(houses)) { alert("Unexpected response from server."); return; }
     const selectedCoords = new Set(_boxSelectedHouses.map(h => `${h.lat.toFixed(6)},${h.lng.toFixed(6)}`));
