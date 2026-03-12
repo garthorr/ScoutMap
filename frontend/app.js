@@ -945,7 +945,9 @@ async function boxDeleteSelected() {
   });
   try {
     const r = await authFetch(API + "/api/houses/map?" + params);
+    if (!r.ok) { alert("Failed to query houses."); return; }
     const houses = await r.json();
+    if (!Array.isArray(houses)) { alert("Unexpected response from server."); return; }
     // Match by proximity
     const selectedCoords = new Set(_boxSelectedHouses.map(h => `${h.lat.toFixed(6)},${h.lng.toFixed(6)}`));
     const ids = houses
@@ -1002,7 +1004,9 @@ async function boxAssignSelected() {
 
   try {
     const r = await authFetch(API + "/api/houses/map?" + params);
+    if (!r.ok) { alert("Failed to query houses."); return; }
     const houses = await r.json();
+    if (!Array.isArray(houses)) { alert("Unexpected response from server."); return; }
     const selectedCoords = new Set(_boxSelectedHouses.map(h => `${h.lat.toFixed(6)},${h.lng.toFixed(6)}`));
     const matchedHouses = houses.filter(h => h.latitude && h.longitude && selectedCoords.has(`${h.latitude.toFixed(6)},${h.longitude.toFixed(6)}`));
 
