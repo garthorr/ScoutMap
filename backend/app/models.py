@@ -199,6 +199,7 @@ class ScoutRoster(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(200), nullable=False)
     scout_id = Column(String(100))
+    password_hash = Column(String(200))  # bcrypt hash, set by admin
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

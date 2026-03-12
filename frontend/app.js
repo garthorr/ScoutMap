@@ -1082,17 +1082,43 @@ async function loadRoster() {
   const r = await authFetch(API + "/api/scout/roster");
   const roster = await r.json();
   document.getElementById("roster-list").innerHTML = roster.length
-    ? `<table><tr><th>Name</th><th>Scout ID</th><th>Status</th><th></th></tr>` +
+    ? `<table><tr><th>Name</th><th>Scout ID</th><th>Status</th><th>Password</th><th></th></tr>` +
       roster.map(s => `<tr>
         <td>${s.name}</td>
         <td>${s.scout_id || "—"}</td>
         <td><span class="badge badge-${s.active ? "completed" : "pending"}">${s.active ? "Active" : "Inactive"}</span></td>
+        <td>${s.has_password
+          ? '<span class="badge badge-completed">Set</span> <button class="btn-sm" onclick="clearScoutPassword(\'' + s.id + '\')">Clear</button>'
+          : '<span class="badge badge-pending">None</span>'
+        }</td>
         <td>
+          <button class="btn-sm" onclick="promptScoutPassword('${s.id}', '${s.name.replace(/'/g, "\\'")}')">Set Password</button>
           <button class="btn-sm" onclick="toggleRosterScout('${s.id}')">${s.active ? "Deactivate" : "Activate"}</button>
           <button class="btn-sm btn-danger" onclick="deleteRosterScout('${s.id}')">Delete</button>
         </td>
       </tr>`).join("") + `</table>`
     : "<p>No scouts in roster. Add scouts above.</p>";
+}
+async function promptScoutPassword(rosterId, name) {
+  const pw = prompt("Set password for " + name + " (min 4 characters):");
+  if (!pw) return;
+  if (pw.length < 4) { alert("Password must be at least 4 characters."); return; }
+  try {
+    const r = await authFetch(API + "/api/auth/scout-password/" + rosterId, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw }),
+    });
+    if (r.ok) { loadRoster(); }
+    else { const d = await r.json(); alert(d.detail || "Error setting password."); }
+  } catch (err) { alert("Network error: " + err.message); }
+}
+async function clearScoutPassword(rosterId) {
+  if (!confirm("Clear this scout's password? They won't be able to log in until a new one is set.")) return;
+  try {
+    const r = await authFetch(API + "/api/auth/scout-password/" + rosterId, { method: "DELETE" });
+    if (r.ok) { loadRoster(); }
+    else { const d = await r.json(); alert(d.detail || "Error clearing password."); }
+  } catch (err) { alert("Network error: " + err.message); }
 }
 document.getElementById("roster-form").onsubmit = async (e) => {
   e.preventDefault();

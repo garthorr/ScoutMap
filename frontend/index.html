@@ -333,12 +333,12 @@
         <details class="source-guides">
           <summary>CSV Format Guide</summary>
           <p style="margin:8px 0 4px;font-size:13px;color:var(--sa-gray);line-height:1.6;">
-            Upload a CSV file with a <strong>header row</strong>. Required column: <code>name</code>. Optional column: <code>scout_id</code>. Extra columns are ignored. Duplicate names are skipped.
+            Upload a CSV file with a <strong>header row</strong>. Required column: <code>name</code>. Optional columns: <code>scout_id</code>, <code>password</code> (min 4 chars). Extra columns are ignored. Duplicate names are skipped.
           </p>
-          <pre style="background:#f5f5f0;padding:10px 14px;border-radius:6px;font-size:13px;margin-top:6px;overflow-x:auto;">name,scout_id
-John Smith,12345
-Jane Doe,67890
-Alex Johnson,</pre>
+          <pre style="background:#f5f5f0;padding:10px 14px;border-radius:6px;font-size:13px;margin-top:6px;overflow-x:auto;">name,scout_id,password
+John Smith,12345,pass1234
+Jane Doe,67890,
+Alex Johnson,,mypass</pre>
         </details>
         <form id="roster-import-form" class="inline-form" enctype="multipart/form-data" style="margin-top:10px;">
           <input name="file" type="file" accept=".csv" required />

@@ -1,6 +1,8 @@
-"""Authentication endpoints – email OTP login flow."""
+"""Authentication endpoints – email OTP login flow + scout password login."""
 
+import hashlib
 import logging
+import os
 import secrets
 import smtplib
 from datetime import datetime, timedelta
@@ -14,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import AllowedEmail, AuthCode, AuthSession
+from app.models import AllowedEmail, AuthCode, AuthSession, ScoutRoster
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -245,5 +247,117 @@ def remove_allowed_email(
     if not row:
         raise HTTPException(404, "Not found")
     db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Password hashing helpers (PBKDF2 — stdlib, no extra dependency)
+# ---------------------------------------------------------------------------
+def _hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260_000)
+    return salt.hex() + ":" + dk.hex()
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    try:
+        salt_hex, dk_hex = stored.split(":", 1)
+        salt = bytes.fromhex(salt_hex)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260_000)
+        return secrets.compare_digest(dk.hex(), dk_hex)
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Scout password login (no email required)
+# ---------------------------------------------------------------------------
+class ScoutLoginBody(BaseModel):
+    scout_id: str  # roster row UUID
+    password: str
+
+
+@router.get("/scout-roster")
+def public_scout_roster(db: Session = Depends(get_db)):
+    """Public list of active scouts with passwords set (for login dropdown)."""
+    scouts = db.query(ScoutRoster).filter(
+        ScoutRoster.active == True,  # noqa: E712
+        ScoutRoster.password_hash.isnot(None),
+    ).order_by(ScoutRoster.name).all()
+    return [
+        {"id": str(s.id), "name": s.name, "scout_id": s.scout_id or ""}
+        for s in scouts
+    ]
+
+
+@router.post("/scout-login")
+def scout_login(body: ScoutLoginBody, db: Session = Depends(get_db)):
+    """Authenticate a scout by roster ID + password. Returns a session token."""
+    scout = db.query(ScoutRoster).filter(
+        ScoutRoster.id == body.scout_id,
+        ScoutRoster.active == True,  # noqa: E712
+    ).first()
+
+    if not scout or not scout.password_hash:
+        raise HTTPException(401, "Invalid scout or password not set")
+
+    if not _verify_password(body.password, scout.password_hash):
+        raise HTTPException(401, "Incorrect password")
+
+    token = secrets.token_hex(32)
+    session = AuthSession(
+        token=token,
+        email=f"scout:{scout.id}",  # tag session as scout-type
+        expires_at=datetime.utcnow() + timedelta(hours=settings.session_expiry_hours),
+    )
+    db.add(session)
+    db.commit()
+
+    return {
+        "ok": True,
+        "token": token,
+        "scout_name": scout.name,
+        "scout_id": scout.scout_id or "",
+        "roster_id": str(scout.id),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin: set / reset scout password
+# ---------------------------------------------------------------------------
+class SetScoutPasswordBody(BaseModel):
+    password: str
+
+
+@router.put("/scout-password/{roster_id}")
+def set_scout_password(
+    roster_id: str,
+    body: SetScoutPasswordBody,
+    email: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Admin sets or resets a scout's password."""
+    scout = db.query(ScoutRoster).filter(ScoutRoster.id == roster_id).first()
+    if not scout:
+        raise HTTPException(404, "Scout not found")
+    if len(body.password) < 4:
+        raise HTTPException(400, "Password must be at least 4 characters")
+    scout.password_hash = _hash_password(body.password)
+    db.commit()
+    return {"ok": True, "name": scout.name}
+
+
+@router.delete("/scout-password/{roster_id}")
+def clear_scout_password(
+    roster_id: str,
+    email: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Admin clears a scout's password (disables password login)."""
+    scout = db.query(ScoutRoster).filter(ScoutRoster.id == roster_id).first()
+    if not scout:
+        raise HTTPException(404, "Scout not found")
+    scout.password_hash = None
     db.commit()
     return {"ok": True}
