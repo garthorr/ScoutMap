@@ -14,11 +14,20 @@
       <h1>⚜ ScoutMap</h1>
       <p class="login-subtitle">Scouting America Fundraising Tool</p>
 
-      <div id="login-step-email">
+      <div id="login-step-admin">
+        <label for="login-admin-pw">Admin Password</label>
+        <input id="login-admin-pw" type="password" placeholder="Enter admin password" autocomplete="current-password" />
+        <button id="login-admin-btn" onclick="loginAdminPassword()">Sign In</button>
+        <p id="login-admin-error" class="login-error"></p>
+        <button class="login-back" onclick="showEmailLogin()">Sign in with email instead</button>
+      </div>
+
+      <div id="login-step-email" style="display:none">
         <label for="login-email">Email Address</label>
         <input id="login-email" type="email" placeholder="you@example.com" autocomplete="email" />
         <button id="login-send-btn" onclick="loginRequestCode()">Send Login Code</button>
         <p id="login-email-error" class="login-error"></p>
+        <button class="login-back" onclick="showAdminPasswordLogin()">Sign in with admin password</button>
       </div>
 
       <div id="login-step-code" style="display:none">

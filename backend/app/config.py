@@ -7,6 +7,7 @@ class Settings(BaseSettings):
 
     # Auth
     allowed_emails: str = ""  # comma-separated seed list, e.g. "admin@example.com,*@myorg.org"
+    admin_password: str = ""  # master admin password, bypasses email OTP
     session_expiry_hours: int = 72
     auth_code_expiry_minutes: int = 10
 
