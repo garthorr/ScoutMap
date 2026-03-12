@@ -235,7 +235,7 @@ async function loadWalkRoutes(eventId) {
       if (streetHouses.length >= 2) {
         // Compute midline: average lat/lon of adjacent pairs sorted by address
         // Group into even/odd sides, then average to get center line
-        const midCoords = _streetMidline(streetHouses);
+        const midCoords = _computeMidline(streetHouses);
         const line = L.polyline(midCoords, {
           color, weight: 5, opacity: 0.7, lineCap: "round", lineJoin: "round",
         });
@@ -263,35 +263,24 @@ async function loadWalkRoutes(eventId) {
 }
 
 /**
- * Compute a midline trace for houses on a street.
- * Groups houses by even/odd address numbers (opposite sides of street),
+ * Compute a midline trace for a sorted list of house points.
+ * Each item needs {lat, lon, address_number|num} (supports both formats).
+ * Groups by even/odd address numbers (opposite sides of street),
  * then averages positions pairwise to trace down the center.
- * Falls back to a simple averaged polyline if sides can't be determined.
  */
-function _streetMidline(sortedHouses) {
-  const coords = sortedHouses.map(eh => ({
-    lat: eh.house.latitude,
-    lon: eh.house.longitude,
-    num: parseInt(eh.house.address_number) || 0,
+function _computeMidline(sortedHouses) {
+  const coords = sortedHouses.map(h => ({
+    lat: h.lat ?? h.house?.latitude,
+    lon: h.lon ?? h.house?.longitude,
+    num: parseInt(h.address_number ?? h.house?.address_number) || 0,
   }));
 
-  // Split into even/odd (opposite sides of street)
   const even = coords.filter(c => c.num % 2 === 0);
   const odd = coords.filter(c => c.num % 2 === 1);
 
-  // If we have houses on both sides, average matching pairs
   if (even.length >= 2 && odd.length >= 2) {
     const midpoints = [];
-    // Walk through sorted even/odd and pair nearest positions
-    const longer = even.length >= odd.length ? even : odd;
-    const shorter = even.length >= odd.length ? odd : even;
-
-    // Start midline from first house position (min address)
-    const firstPt = coords[0];
-    const lastPt = coords[coords.length - 1];
-
-    // Simple approach: take midpoints at regular intervals along both sides
-    const steps = Math.max(longer.length, 3);
+    const steps = Math.max(Math.max(even.length, odd.length), 3);
     for (let i = 0; i < steps; i++) {
       const t = i / (steps - 1);
       const ei = Math.min(Math.floor(t * (even.length - 1) + 0.5), even.length - 1);
@@ -304,11 +293,7 @@ function _streetMidline(sortedHouses) {
     return midpoints;
   }
 
-  // Fallback: not enough on both sides, just use a smoothed center line
-  // Average consecutive pairs to reduce zig-zag
-  if (coords.length <= 2) {
-    return coords.map(c => [c.lat, c.lon]);
-  }
+  if (coords.length <= 2) return coords.map(c => [c.lat, c.lon]);
   const mid = [];
   for (let i = 0; i < coords.length - 1; i++) {
     mid.push([
@@ -422,7 +407,7 @@ function _highlightSelectedStreets() {
 
     // Draw midline street trace
     if (sorted.length >= 2) {
-      const midCoords = _rawMidline(sorted);
+      const midCoords = _computeMidline(sorted);
       const line = L.polyline(midCoords, {
         color: "#CE1126", weight: 5, opacity: 0.8,
         lineCap: "round", lineJoin: "round",
@@ -441,40 +426,6 @@ function _highlightSelectedStreets() {
       streetHighlightLayer.addLayer(dot);
     });
   });
-}
-
-/** Midline from raw house data ({lat, lon, address_number}). */
-function _rawMidline(sortedHouses) {
-  const coords = sortedHouses.map(h => ({
-    lat: h.lat, lon: h.lon,
-    num: parseInt(h.address_number) || 0,
-  }));
-  const even = coords.filter(c => c.num % 2 === 0);
-  const odd = coords.filter(c => c.num % 2 === 1);
-
-  if (even.length >= 2 && odd.length >= 2) {
-    const midpoints = [];
-    const steps = Math.max(Math.max(even.length, odd.length), 3);
-    for (let i = 0; i < steps; i++) {
-      const t = i / (steps - 1);
-      const ei = Math.min(Math.floor(t * (even.length - 1) + 0.5), even.length - 1);
-      const oi = Math.min(Math.floor(t * (odd.length - 1) + 0.5), odd.length - 1);
-      midpoints.push([
-        (even[ei].lat + odd[oi].lat) / 2,
-        (even[ei].lon + odd[oi].lon) / 2,
-      ]);
-    }
-    return midpoints;
-  }
-  if (coords.length <= 2) return coords.map(c => [c.lat, c.lon]);
-  const mid = [];
-  for (let i = 0; i < coords.length - 1; i++) {
-    mid.push([
-      (coords[i].lat + coords[i + 1].lat) / 2,
-      (coords[i].lon + coords[i + 1].lon) / 2,
-    ]);
-  }
-  return mid;
 }
 
 function copySelectedStreets() {
@@ -540,24 +491,17 @@ async function openEvent(id, name) {
   loadEventHouses();
 }
 
-async function loadEventHouses() {
-  const r = await fetch(API + `/api/events/${currentEventId}/houses`);
-  const houses = await r.json();
-  const el = document.getElementById("event-houses-list");
-  if (!houses.length) { el.innerHTML = "<p>No houses assigned. Use Walk Groups or Manual Assign to add houses.</p>"; return; }
-
-  // Group by assigned_to label
+function _renderGroupedHouses(houses, { openByDefault = false } = {}) {
   const groups = {};
   houses.forEach(eh => {
     const key = eh.assigned_to || "Unassigned";
     if (!groups[key]) groups[key] = [];
     groups[key].push(eh);
   });
-
   let html = "";
   for (const [label, items] of Object.entries(groups)) {
     const visited = items.filter(eh => eh.status === "visited").length;
-    html += `<details open><summary><strong>${label}</strong> — ${items.length} houses, ${visited} visited</summary>`;
+    html += `<details${openByDefault ? " open" : ""}><summary><strong>${label}</strong> — ${items.length} houses, ${visited} visited</summary>`;
     html += `<table><tr><th>#</th><th>Address</th><th>Owner</th><th>Status</th><th></th></tr>`;
     html += items.map((eh, idx) => `<tr>
       <td>${idx + 1}</td>
@@ -568,7 +512,17 @@ async function loadEventHouses() {
     </tr>`).join("");
     html += `</table></details>`;
   }
-  el.innerHTML = html;
+  return html;
+}
+
+let _eventHousesCache = [];
+async function loadEventHouses() {
+  const r = await fetch(API + `/api/events/${currentEventId}/houses`);
+  const houses = await r.json();
+  _eventHousesCache = houses;
+  const el = document.getElementById("event-houses-list");
+  if (!houses.length) { el.innerHTML = "<p>No houses assigned. Use Walk Groups or Manual Assign to add houses.</p>"; return; }
+  el.innerHTML = _renderGroupedHouses(houses, { openByDefault: true });
 }
 
 document.getElementById("assign-form").onsubmit = async (e) => {
@@ -671,60 +625,35 @@ async function loadWalkGroupList() {
       return;
     }
     const houses = await r.json();
+    _eventHousesCache = houses;
     if (!Array.isArray(houses) || !houses.length) {
       el.innerHTML = "<p>No groups yet. Generate walk groups above.</p>";
       return;
     }
-
-    const groups = {};
-    houses.forEach(eh => {
-      const key = eh.assigned_to || "Unassigned";
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(eh);
-    });
-
-    let html = "";
-    for (const [label, items] of Object.entries(groups)) {
-      const visited = items.filter(eh => eh.status === "visited").length;
-      html += `<details><summary><strong>${label}</strong> — ${items.length} houses, ${visited} visited</summary>`;
-      html += `<table><tr><th>#</th><th>Address</th><th>Owner</th><th>Status</th><th></th></tr>`;
-      html += items.map((eh, idx) => `<tr>
-        <td>${idx + 1}</td>
-        <td>${eh.house.full_address}</td>
-        <td>${eh.house.owner_name || "—"}</td>
-        <td><span class="badge badge-${eh.status}">${eh.status}</span></td>
-        <td><button class="btn-sm" onclick="openVisitModal('${currentEventId}','${eh.id}','${eh.house.full_address.replace(/'/g, "\\'")}')">Visit</button></td>
-      </tr>`).join("");
-      html += `</table></details>`;
-    }
-    el.innerHTML = html;
+    el.innerHTML = _renderGroupedHouses(houses);
   } catch (err) {
     el.innerHTML = `<p>Error loading groups: ${err.message}</p>`;
   }
 }
 
-async function exportWalkGroupsCSV() {
+function exportWalkGroupsCSV() {
   if (!currentEventId) { alert("Select an event first."); return; }
-  const r = await fetch(API + `/api/events/${currentEventId}/houses`);
-  const houses = await r.json();
-  if (!houses.length) { alert("No walk groups to export."); return; }
+  if (!_eventHousesCache.length) { alert("No walk groups to export."); return; }
   exportCSV("walk-groups.csv",
     ["Group", "Address", "Owner", "ZIP", "Status"],
-    houses.map(eh => [
+    _eventHousesCache.map(eh => [
       eh.assigned_to || "Unassigned", eh.house.full_address,
       eh.house.owner_name || "", eh.house.zip_code || "", eh.status,
     ])
   );
 }
 
-async function exportEventHousesCSV() {
+function exportEventHousesCSV() {
   if (!currentEventId) return;
-  const r = await fetch(API + `/api/events/${currentEventId}/houses`);
-  const houses = await r.json();
-  if (!houses.length) { alert("No houses to export."); return; }
+  if (!_eventHousesCache.length) { alert("No houses to export."); return; }
   exportCSV(`event-${currentEventName || "houses"}.csv`,
     ["Group", "Address", "Owner", "ZIP", "Status", "Latitude", "Longitude"],
-    houses.map(eh => [
+    _eventHousesCache.map(eh => [
       eh.assigned_to || "Unassigned", eh.house.full_address,
       eh.house.owner_name || "", eh.house.zip_code || "", eh.status,
       eh.house.latitude || "", eh.house.longitude || "",
