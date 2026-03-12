@@ -426,10 +426,16 @@ document.getElementById("map-event-select").onchange = function () {
 
 async function loadWalkRoutes(eventId) {
   walkRouteLayer.clearLayers();
-  if (!eventId) return;
+  if (!eventId) {
+    document.getElementById("map-group-panel").style.display = "none";
+    return;
+  }
   const r = await authFetch(API + `/api/events/${eventId}/houses`);
   const houses = await r.json();
-  if (!houses.length) return;
+  if (!houses.length) {
+    document.getElementById("map-group-panel").style.display = "none";
+    return;
+  }
 
   // Group by assigned_to
   const groups = {};
@@ -491,6 +497,117 @@ async function loadWalkRoutes(eventId) {
     .filter(eh => eh.house?.latitude && eh.house?.longitude)
     .map(eh => [eh.house.latitude, eh.house.longitude]);
   if (allCoords.length) map.fitBounds(L.latLngBounds(allCoords).pad(0.1));
+
+  // Render group manipulation panel
+  _renderGroupPanel(eventId, groups);
+}
+
+function _renderGroupPanel(eventId, groups) {
+  const panel = document.getElementById("map-group-panel");
+  const listEl = document.getElementById("map-group-list");
+  const nameEl = document.getElementById("map-group-event-name");
+
+  const labels = Object.keys(groups);
+  if (!labels.length) {
+    panel.style.display = "none";
+    return;
+  }
+
+  panel.style.display = "";
+  const sel = document.getElementById("map-event-select");
+  nameEl.textContent = "— " + (sel.options[sel.selectedIndex]?.text || "");
+
+  let colorIdx = 0;
+  listEl.innerHTML = labels.map(label => {
+    const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
+    colorIdx++;
+    const count = groups[label].length;
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:4px 0;border-bottom:1px solid #eee;">
+      <input type="checkbox" class="group-merge-cb" value="${esc(label)}" title="Select for merge" />
+      <span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${color};flex-shrink:0;"></span>
+      <strong style="min-width:80px;">${esc(label)}</strong>
+      <span style="color:var(--sa-gray);font-size:12px;">${count} houses</span>
+      <button class="btn-sm" onclick="renameGroup('${esc(eventId)}','${esc(label)}')" style="margin-left:auto;">Rename</button>
+      <button class="btn-sm btn-danger" onclick="deleteGroup('${esc(eventId)}','${esc(label)}')">Delete</button>
+    </div>`;
+  }).join("") +
+    `<div style="margin-top:8px;">
+      <button class="btn-sm" onclick="mergeSelectedGroups('${esc(eventId)}')">Merge Selected</button>
+    </div>`;
+}
+
+async function renameGroup(eventId, oldLabel) {
+  const newLabel = prompt(`Rename group "${oldLabel}" to:`, oldLabel);
+  if (!newLabel || newLabel === oldLabel) return;
+  try {
+    const r = await authFetch(API + `/api/events/${eventId}/groups/reassign`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ old_label: oldLabel, new_label: newLabel.trim() }),
+    });
+    if (r.ok) {
+      loadWalkRoutes(eventId);
+      // Refresh walk group list if on that page
+      if (document.getElementById("page-walk-groups").classList.contains("active")) loadWalkGroupList();
+    } else {
+      const data = await r.json().catch(() => ({}));
+      alert(data.detail || "Failed to rename group.");
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function deleteGroup(eventId, label) {
+  if (!confirm(`Delete group "${label}"? All houses in this group will be unassigned from the event.`)) return;
+  try {
+    const r = await authFetch(API + `/api/events/${eventId}/groups?label=${encodeURIComponent(label)}`, {
+      method: "DELETE",
+    });
+    if (r.ok) {
+      loadWalkRoutes(eventId);
+      if (document.getElementById("page-walk-groups").classList.contains("active")) loadWalkGroupList();
+    } else {
+      const data = await r.json().catch(() => ({}));
+      alert(data.detail || "Failed to delete group.");
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function mergeSelectedGroups(eventId) {
+  const checkboxes = document.querySelectorAll(".group-merge-cb:checked");
+  if (checkboxes.length < 2) { alert("Select at least 2 groups to merge."); return; }
+  const labels = [...checkboxes].map(cb => cb.value);
+  const targetLabel = prompt(`Merge ${labels.length} groups into one. Enter the target group name:`, labels[0]);
+  if (!targetLabel) return;
+
+  const sourceLabels = labels.filter(l => l !== targetLabel.trim());
+  if (!sourceLabels.length) {
+    // All selected groups have the same name as target — nothing to merge
+    alert("All selected groups already have that name.");
+    return;
+  }
+
+  try {
+    const r = await authFetch(API + `/api/events/${eventId}/groups/merge`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_labels: sourceLabels, target_label: targetLabel.trim() }),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      alert(`Merged ${data.updated || sourceLabels.length} group(s) into "${targetLabel.trim()}".`);
+      loadWalkRoutes(eventId);
+      if (document.getElementById("page-walk-groups").classList.contains("active")) loadWalkGroupList();
+    } else {
+      const data = await r.json().catch(() => ({}));
+      alert(data.detail || "Failed to merge groups.");
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
 }
 
 /**
@@ -673,10 +790,16 @@ function copySelectedStreets() {
   alert(`${_selectedStreets.size} street(s) copied to Walk Groups form.`);
 }
 
-// --- Map tools: erase & add ---
-let _mapTool = "pointer";       // "pointer" | "erase" | "add"
+// --- Map tools: erase, add, box-select ---
+let _mapTool = "pointer";       // "pointer" | "erase" | "add" | "select"
 let _eraseMarked = new Map();   // house_id -> L.marker (X markers for pending deletes)
 let _addMarker = null;          // temp marker for add mode
+
+// Box-select state
+let _boxSelectRect = null;      // L.rectangle drawn during drag
+let _boxSelectStart = null;     // {lat, lng} of mousedown
+let _boxSelectedHouses = [];    // array of {id, lat, lng, address, marker}
+let _boxHighlights = [];        // L.circleMarker highlights for selected houses
 
 function setMapTool(tool) {
   // Clean up previous tool state
@@ -684,6 +807,7 @@ function setMapTool(tool) {
   if (_mapTool === "add" && tool !== "add" && _addMarker) {
     map.removeLayer(_addMarker); _addMarker = null;
   }
+  if (_mapTool === "select" && tool !== "select") clearBoxSelection();
 
   _mapTool = tool;
   document.querySelectorAll(".map-tool").forEach(b => b.classList.remove("active"));
@@ -699,10 +823,211 @@ function setMapTool(tool) {
     hint.textContent = "Click on the map to place a new house.";
     mapEl.style.cursor = "crosshair";
     map.dragging.enable();
+  } else if (tool === "select") {
+    hint.textContent = "Click and drag a rectangle to select houses.";
+    mapEl.style.cursor = "crosshair";
+    map.dragging.disable();
+    _initBoxSelect();
   } else {
     hint.textContent = "";
     mapEl.style.cursor = "";
     map.dragging.enable();
+  }
+}
+
+// --- Box select tool ---
+function _initBoxSelect() {
+  const container = map.getContainer();
+  container.addEventListener("mousedown", _boxMouseDown);
+}
+
+function _boxMouseDown(e) {
+  if (_mapTool !== "select") return;
+  // Only left click
+  if (e.button !== 0) return;
+  const latlng = map.containerPointToLatLng(L.point(e.clientX - map.getContainer().getBoundingClientRect().left, e.clientY - map.getContainer().getBoundingClientRect().top));
+  _boxSelectStart = latlng;
+  if (_boxSelectRect) { map.removeLayer(_boxSelectRect); _boxSelectRect = null; }
+
+  document.addEventListener("mousemove", _boxMouseMove);
+  document.addEventListener("mouseup", _boxMouseUp);
+}
+
+function _boxMouseMove(e) {
+  if (!_boxSelectStart || _mapTool !== "select") return;
+  const rect = map.getContainer().getBoundingClientRect();
+  const latlng = map.containerPointToLatLng(L.point(e.clientX - rect.left, e.clientY - rect.top));
+  const bounds = L.latLngBounds(_boxSelectStart, latlng);
+  if (_boxSelectRect) {
+    _boxSelectRect.setBounds(bounds);
+  } else {
+    _boxSelectRect = L.rectangle(bounds, { color: "#003F87", weight: 2, fillOpacity: 0.15, dashArray: "6 3" }).addTo(map);
+  }
+}
+
+function _boxMouseUp(e) {
+  document.removeEventListener("mousemove", _boxMouseMove);
+  document.removeEventListener("mouseup", _boxMouseUp);
+  if (!_boxSelectStart || _mapTool !== "select") return;
+
+  const rect = map.getContainer().getBoundingClientRect();
+  const latlng = map.containerPointToLatLng(L.point(e.clientX - rect.left, e.clientY - rect.top));
+  const bounds = L.latLngBounds(_boxSelectStart, latlng);
+  _boxSelectStart = null;
+
+  // Remove the rectangle visual
+  if (_boxSelectRect) { map.removeLayer(_boxSelectRect); _boxSelectRect = null; }
+
+  // Ignore tiny drags (likely just a click)
+  const size = map.latLngToContainerPoint(bounds.getNorthEast()).subtract(map.latLngToContainerPoint(bounds.getSouthWest()));
+  if (Math.abs(size.x) < 10 && Math.abs(size.y) < 10) return;
+
+  // Find houses inside the bounds
+  _clearBoxHighlights();
+  _boxSelectedHouses = [];
+  houseDotLayer.eachLayer(layer => {
+    if (layer.getLatLng && bounds.contains(layer.getLatLng())) {
+      const ll = layer.getLatLng();
+      // Extract house info from the popup content if available
+      const popup = layer.getPopup();
+      const content = popup ? popup.getContent() : "";
+      const addrMatch = content.match(/<b>(.*?)<\/b>/);
+      const address = addrMatch ? addrMatch[1].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"') : "";
+      _boxSelectedHouses.push({ lat: ll.lat, lng: ll.lng, address, _layer: layer });
+      // Highlight
+      const hl = L.circleMarker(ll, { radius: 8, fillColor: "#f59e0b", color: "#fff", weight: 2, fillOpacity: 0.8 }).addTo(map);
+      _boxHighlights.push(hl);
+    }
+  });
+
+  _updateBoxSelectedUI();
+}
+
+function _clearBoxHighlights() {
+  _boxHighlights.forEach(m => map.removeLayer(m));
+  _boxHighlights = [];
+}
+
+function _updateBoxSelectedUI() {
+  const el = document.getElementById("map-box-selected");
+  const countEl = document.getElementById("map-box-count");
+  if (_boxSelectedHouses.length > 0) {
+    el.style.display = "";
+    countEl.textContent = _boxSelectedHouses.length;
+  } else {
+    el.style.display = "none";
+  }
+}
+
+function clearBoxSelection() {
+  _clearBoxHighlights();
+  _boxSelectedHouses = [];
+  _updateBoxSelectedUI();
+  if (_boxSelectRect && map) { map.removeLayer(_boxSelectRect); _boxSelectRect = null; }
+  _boxSelectStart = null;
+  // Remove event listener
+  if (map) map.getContainer().removeEventListener("mousedown", _boxMouseDown);
+}
+
+async function boxDeleteSelected() {
+  if (!_boxSelectedHouses.length) return;
+  if (!confirm(`Delete ${_boxSelectedHouses.length} selected house(s)? This cannot be undone.`)) return;
+
+  // We need to find house IDs — query the API for houses in the bounding box
+  const lats = _boxSelectedHouses.map(h => h.lat);
+  const lngs = _boxSelectedHouses.map(h => h.lng);
+  const params = new URLSearchParams({
+    min_lat: Math.min(...lats) - 0.0001,
+    max_lat: Math.max(...lats) + 0.0001,
+    min_lon: Math.min(...lngs) - 0.0001,
+    max_lon: Math.max(...lngs) + 0.0001,
+    limit: 5000,
+  });
+  try {
+    const r = await authFetch(API + "/api/houses/map?" + params);
+    const houses = await r.json();
+    // Match by proximity
+    const selectedCoords = new Set(_boxSelectedHouses.map(h => `${h.lat.toFixed(6)},${h.lng.toFixed(6)}`));
+    const ids = houses
+      .filter(h => h.latitude && h.longitude && selectedCoords.has(`${h.latitude.toFixed(6)},${h.longitude.toFixed(6)}`))
+      .map(h => h.id);
+
+    if (!ids.length) { alert("Could not match selected houses."); return; }
+
+    const dr = await authFetch(API + "/api/houses/batch-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ house_ids: ids }),
+    });
+    if (dr.ok) {
+      clearBoxSelection();
+      refreshMapDots();
+    } else {
+      const data = await dr.json();
+      alert(data.detail || "Error deleting houses.");
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function boxAssignSelected() {
+  if (!_boxSelectedHouses.length) return;
+  // Prompt for event selection
+  let eventsData;
+  try {
+    const r = await authFetch(API + "/api/events/");
+    eventsData = await r.json();
+  } catch { alert("Could not load events."); return; }
+
+  if (!eventsData.length) { alert("No events exist. Create one first."); return; }
+
+  const eventName = prompt("Enter event name to assign to:\n\n" + eventsData.map(e => "  " + e.name).join("\n"));
+  if (!eventName) return;
+  const ev = eventsData.find(e => e.name.toLowerCase() === eventName.trim().toLowerCase());
+  if (!ev) { alert("Event not found. Enter the exact name."); return; }
+
+  const groupLabel = prompt("Group label (optional):", "");
+
+  // Get house IDs by querying the map API
+  const lats = _boxSelectedHouses.map(h => h.lat);
+  const lngs = _boxSelectedHouses.map(h => h.lng);
+  const params = new URLSearchParams({
+    min_lat: Math.min(...lats) - 0.0001,
+    max_lat: Math.max(...lats) + 0.0001,
+    min_lon: Math.min(...lngs) - 0.0001,
+    max_lon: Math.max(...lngs) + 0.0001,
+    limit: 5000,
+  });
+
+  try {
+    const r = await authFetch(API + "/api/houses/map?" + params);
+    const houses = await r.json();
+    const selectedCoords = new Set(_boxSelectedHouses.map(h => `${h.lat.toFixed(6)},${h.lng.toFixed(6)}`));
+    const matchedHouses = houses.filter(h => h.latitude && h.longitude && selectedCoords.has(`${h.latitude.toFixed(6)},${h.longitude.toFixed(6)}`));
+
+    if (!matchedHouses.length) { alert("Could not match selected houses."); return; }
+
+    // Assign each house to the event
+    const body = {
+      house_ids: matchedHouses.map(h => h.id),
+      assigned_to: groupLabel || undefined,
+    };
+    const ar = await authFetch(API + `/api/events/${ev.id}/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (ar.ok) {
+      const data = await ar.json();
+      alert(`Assigned ${data.assigned || matchedHouses.length} house(s) to "${ev.name}".`);
+      clearBoxSelection();
+    } else {
+      const data = await ar.json();
+      alert(data.detail || "Error assigning houses.");
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
   }
 }
 
@@ -858,6 +1183,7 @@ async function loadEvents() {
         <td>
           <button class="btn-sm" onclick="openEvent('${esc(e.id)}','${esc(e.name)}')">Open</button>
           <button class="btn-sm" onclick="editEvent('${esc(e.id)}')" style="margin-left:4px;">Edit</button>
+          <button class="btn-sm" onclick="duplicateEvent('${esc(e.id)}')" style="margin-left:4px;">Duplicate</button>
           <button class="btn-sm btn-danger" onclick="deleteEvent('${esc(e.id)}','${esc(e.name)}')" style="margin-left:4px;">Delete</button>
         </td>
       </tr>`).join("") + `</table>`
@@ -927,6 +1253,23 @@ async function editEvent(id) {
     alert("Error: " + err.message);
   }
 }
+async function duplicateEvent(id) {
+  if (!confirm("Duplicate this event with all house assignments (visits will not be copied)?")) return;
+  try {
+    const r = await authFetch(API + `/api/events/${id}/duplicate`, { method: "POST" });
+    if (r.ok) {
+      const data = await r.json();
+      alert(`Event duplicated: "${data.name}" with ${data.house_count ?? 0} houses.`);
+      loadEvents();
+    } else {
+      const data = await r.json().catch(() => ({}));
+      alert(data.detail || "Failed to duplicate event.");
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
 async function exportEventsCSV() {
   const r = await authFetch(API + "/api/events/");
   const events = await r.json();
