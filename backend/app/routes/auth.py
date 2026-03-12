@@ -115,6 +115,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> str:
     if not session:
         raise HTTPException(401, "Session expired or invalid")
 
+    return session.email
+
 
 def require_admin(request: Request, db: Session = Depends(get_db)) -> str:
     """Like get_current_user but rejects scout sessions.
@@ -126,8 +128,6 @@ def require_admin(request: Request, db: Session = Depends(get_db)) -> str:
     if email.startswith("scout:"):
         raise HTTPException(403, "Admin access required")
     return email
-
-    return session.email
 
 
 # ---------------------------------------------------------------------------
