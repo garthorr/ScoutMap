@@ -1,10 +1,11 @@
 """Pydantic schemas for API request / response models."""
 
+import json
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 # --- Source Imports ---
@@ -121,6 +122,8 @@ class VisitCreate(BaseModel):
     donation_given: Optional[bool] = None
     former_scout: Optional[bool] = None
     avoid_house: bool = False
+    # Dynamic form fields
+    custom_data: Optional[dict] = None
 
 
 class VisitOut(BaseModel):
@@ -139,6 +142,17 @@ class VisitOut(BaseModel):
     donation_given: Optional[bool] = None
     former_scout: Optional[bool] = None
     avoid_house: bool = False
+    custom_data: Optional[dict] = None
+
+    @field_validator("custom_data", mode="before")
+    @classmethod
+    def parse_custom_data(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return v
 
     class Config:
         from_attributes = True

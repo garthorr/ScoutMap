@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import engine, Base, get_db
 from app.routes import imports, houses, events, stats, arcgis, scout
 from app.routes.auth import router as auth_router, get_current_user
+from app.routes.form_fields import router as form_fields_router, seed_default_fields
 from app.models import AllowedEmail, AuthSession
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
@@ -70,6 +71,18 @@ def _seed_allowed_emails():
 
 
 _seed_allowed_emails()
+
+
+def _seed_form_fields():
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        seed_default_fields(db)
+    finally:
+        db.close()
+
+
+_seed_form_fields()
 
 app = FastAPI(title=settings.app_title)
 
@@ -130,6 +143,7 @@ app.include_router(events.router)
 app.include_router(stats.router)
 app.include_router(arcgis.router)
 app.include_router(scout.router)
+app.include_router(form_fields_router)
 
 # Serve frontend static files
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"

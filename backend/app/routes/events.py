@@ -1,5 +1,6 @@
 """Event endpoints – create events and assign houses."""
 
+import json
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -291,6 +292,7 @@ def record_visit(
         donation_given=body.donation_given,
         former_scout=body.former_scout,
         avoid_house=body.avoid_house,
+        custom_data=json.dumps(body.custom_data) if body.custom_data else None,
     )
     eh.status = "visited"
     db.add(visit)
