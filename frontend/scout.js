@@ -60,13 +60,11 @@ async function _loadLoginRoster() {
 // Toggle between scout and admin login views
 function showAdminLogin() {
   document.getElementById("login-step-scout").style.display = "none";
-  document.getElementById("login-step-email").style.display = "";
-  document.getElementById("login-step-code").style.display = "none";
+  document.getElementById("login-step-admin").style.display = "";
 }
 function showScoutLogin() {
   document.getElementById("login-step-scout").style.display = "";
-  document.getElementById("login-step-email").style.display = "none";
-  document.getElementById("login-step-code").style.display = "none";
+  document.getElementById("login-step-admin").style.display = "none";
 }
 
 // Scout password login
@@ -90,7 +88,6 @@ async function scoutPasswordLogin() {
     if (r.ok && data.token) {
       _authToken = data.token;
       localStorage.setItem("scoutmap_token", _authToken);
-      // Pre-fill scout info from login response
       scoutName = data.scout_name;
       scoutIdNum = data.scout_id || "";
       localStorage.setItem("scoutmap_scout", JSON.stringify({
@@ -107,48 +104,19 @@ async function scoutPasswordLogin() {
   btn.disabled = false; btn.textContent = "Sign In";
 }
 
-// Admin email OTP login
-async function scoutLoginRequestCode() {
-  const email = document.getElementById("login-email").value.trim();
-  const errEl = document.getElementById("login-email-error");
+// Admin password login
+async function scoutAdminLogin() {
+  const pw = document.getElementById("login-admin-pw").value;
+  const errEl = document.getElementById("login-admin-error");
   errEl.style.display = "none";
-  if (!email || !email.includes("@")) { errEl.textContent = "Enter a valid email."; errEl.style.display = ""; return; }
+  if (!pw) { errEl.textContent = "Enter the admin password."; errEl.style.display = ""; return; }
 
-  const btn = document.getElementById("login-send-btn");
-  btn.disabled = true; btn.textContent = "Sending…";
+  const btn = document.getElementById("login-admin-btn");
+  btn.disabled = true; btn.textContent = "Signing in…";
   try {
-    const r = await fetch(API + "/api/auth/request-code", {
+    const r = await fetch(API + "/api/auth/admin-login", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    if (r.ok) {
-      document.getElementById("login-code-email").textContent = email;
-      document.getElementById("login-step-email").style.display = "none";
-      document.getElementById("login-step-code").style.display = "";
-      document.getElementById("login-code").focus();
-    } else {
-      const data = await r.json();
-      errEl.textContent = data.detail || "Error"; errEl.style.display = "";
-    }
-  } catch (err) {
-    errEl.textContent = "Network error: " + err.message; errEl.style.display = "";
-  }
-  btn.disabled = false; btn.textContent = "Send Login Code";
-}
-
-async function scoutLoginVerifyCode() {
-  const email = document.getElementById("login-code-email").textContent;
-  const code = document.getElementById("login-code").value.trim();
-  const errEl = document.getElementById("login-code-error");
-  errEl.style.display = "none";
-  if (!code || code.length < 6) { errEl.textContent = "Enter the 6-digit code."; errEl.style.display = ""; return; }
-
-  const btn = document.getElementById("login-verify-btn");
-  btn.disabled = true; btn.textContent = "Verifying…";
-  try {
-    const r = await fetch(API + "/api/auth/verify-code", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, code }),
+      body: JSON.stringify({ password: pw }),
     });
     const data = await r.json();
     if (r.ok && data.token) {
@@ -157,27 +125,19 @@ async function scoutLoginVerifyCode() {
       _hideLoginOverlay();
       loadRoster(); loadEvents();
     } else {
-      errEl.textContent = data.detail || "Invalid or expired code."; errEl.style.display = "";
+      errEl.textContent = data.detail || "Incorrect password."; errEl.style.display = "";
     }
   } catch (err) {
     errEl.textContent = "Network error: " + err.message; errEl.style.display = "";
   }
-  btn.disabled = false; btn.textContent = "Verify Code";
-}
-
-function scoutLoginBackToEmail() {
-  document.getElementById("login-step-email").style.display = "";
-  document.getElementById("login-step-code").style.display = "none";
+  btn.disabled = false; btn.textContent = "Sign In";
 }
 
 document.getElementById("login-scout-password").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); scoutPasswordLogin(); }
 });
-document.getElementById("login-email").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { e.preventDefault(); scoutLoginRequestCode(); }
-});
-document.getElementById("login-code").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { e.preventDefault(); scoutLoginVerifyCode(); }
+document.getElementById("login-admin-pw").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); scoutAdminLogin(); }
 });
 
 // --- Screen management ---

@@ -184,6 +184,34 @@ def verify_code(body: VerifyCodeBody, db: Session = Depends(get_db)):
     return {"ok": True, "token": token, "email": email}
 
 
+# ---------------------------------------------------------------------------
+# Admin password login (bypasses email OTP, set via ADMIN_PASSWORD env var)
+# ---------------------------------------------------------------------------
+class AdminLoginBody(BaseModel):
+    password: str
+
+
+@router.post("/admin-login")
+def admin_login(body: AdminLoginBody, db: Session = Depends(get_db)):
+    """Authenticate with the master admin password."""
+    if not settings.admin_password:
+        raise HTTPException(403, "Admin password login is not configured")
+
+    if not secrets.compare_digest(body.password, settings.admin_password):
+        raise HTTPException(401, "Incorrect password")
+
+    token = secrets.token_hex(32)
+    session = AuthSession(
+        token=token,
+        email="admin",
+        expires_at=datetime.utcnow() + timedelta(hours=settings.session_expiry_hours),
+    )
+    db.add(session)
+    db.commit()
+
+    return {"ok": True, "token": token, "email": "admin"}
+
+
 @router.post("/logout")
 def logout(request: Request, db: Session = Depends(get_db)):
     """Invalidate the current session."""

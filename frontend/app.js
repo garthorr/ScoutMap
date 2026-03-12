@@ -43,6 +43,48 @@ function _hideLogin() {
   document.getElementById("login-overlay").classList.add("hidden");
 }
 
+// --- Admin password login ---
+async function loginAdminPassword() {
+  const pw = document.getElementById("login-admin-pw").value;
+  const errEl = document.getElementById("login-admin-error");
+  errEl.textContent = "";
+  if (!pw) { errEl.textContent = "Enter the admin password."; return; }
+
+  const btn = document.getElementById("login-admin-btn");
+  btn.disabled = true; btn.textContent = "Signing in…";
+  try {
+    const r = await fetch(API + "/api/auth/admin-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw }),
+    });
+    const data = await r.json();
+    if (r.ok && data.token) {
+      _authToken = data.token;
+      localStorage.setItem("scoutmap_token", _authToken);
+      _hideLogin();
+      document.getElementById("settings-user-email").textContent = data.email;
+      loadDashboard();
+    } else {
+      errEl.textContent = data.detail || "Incorrect password.";
+    }
+  } catch (err) {
+    errEl.textContent = "Network error: " + err.message;
+  }
+  btn.disabled = false; btn.textContent = "Sign In";
+}
+
+function showEmailLogin() {
+  document.getElementById("login-step-admin").style.display = "none";
+  document.getElementById("login-step-email").style.display = "";
+  document.getElementById("login-step-code").style.display = "none";
+}
+function showAdminPasswordLogin() {
+  document.getElementById("login-step-admin").style.display = "";
+  document.getElementById("login-step-email").style.display = "none";
+  document.getElementById("login-step-code").style.display = "none";
+}
+
 async function loginRequestCode() {
   const email = document.getElementById("login-email").value.trim();
   const errEl = document.getElementById("login-email-error");
@@ -121,13 +163,19 @@ async function appLogout() {
   _authToken = "";
   localStorage.removeItem("scoutmap_token");
   _showLogin();
-  document.getElementById("login-step-email").style.display = "";
+  document.getElementById("login-step-admin").style.display = "";
+  document.getElementById("login-step-email").style.display = "none";
   document.getElementById("login-step-code").style.display = "none";
+  document.getElementById("login-admin-pw").value = "";
+  document.getElementById("login-admin-error").textContent = "";
   document.getElementById("login-email").value = "";
   document.getElementById("login-email-error").textContent = "";
 }
 
 // Allow Enter key on login inputs
+document.getElementById("login-admin-pw").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); loginAdminPassword(); }
+});
 document.getElementById("login-email").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); loginRequestCode(); }
 });

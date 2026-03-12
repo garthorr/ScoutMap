@@ -224,28 +224,15 @@
           <button class="btn btn-outline" onclick="showAdminLogin()" style="margin-top:14px;font-size:13px;">Admin Sign In</button>
         </div>
 
-        <!-- Admin email OTP login -->
-        <div id="login-step-email" style="display:none">
+        <!-- Admin password login -->
+        <div id="login-step-admin" style="display:none">
           <div class="field">
-            <label for="login-email">Email Address</label>
-            <input id="login-email" type="email" placeholder="you@example.com" autocomplete="email" />
+            <label for="login-admin-pw">Admin Password</label>
+            <input id="login-admin-pw" type="password" placeholder="Enter admin password" autocomplete="current-password" />
           </div>
-          <button class="btn" id="login-send-btn" onclick="scoutLoginRequestCode()">Send Login Code</button>
-          <p id="login-email-error" class="error-msg" style="display:none"></p>
+          <button class="btn" id="login-admin-btn" onclick="scoutAdminLogin()">Sign In</button>
+          <p id="login-admin-error" class="error-msg" style="display:none"></p>
           <button class="btn btn-outline" onclick="showScoutLogin()" style="margin-top:14px;font-size:13px;">Scout Sign In</button>
-        </div>
-
-        <div id="login-step-code" style="display:none">
-          <p style="font-size:14px;color:var(--sa-gray);margin-bottom:12px;">
-            Enter the 6-digit code sent to <strong id="login-code-email"></strong>
-          </p>
-          <div class="field">
-            <input id="login-code" type="text" maxlength="6" placeholder="000000" autocomplete="one-time-code"
-              inputmode="numeric" style="font-size:28px;font-weight:700;letter-spacing:8px;font-family:monospace;text-align:center;" />
-          </div>
-          <button class="btn" id="login-verify-btn" onclick="scoutLoginVerifyCode()">Verify Code</button>
-          <p id="login-code-error" class="error-msg" style="display:none"></p>
-          <button class="btn btn-outline" onclick="scoutLoginBackToEmail()" style="margin-top:10px;font-size:13px;">Use a different email</button>
         </div>
       </div>
     </div>
