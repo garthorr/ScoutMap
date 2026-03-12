@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models import (
     FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster,
 )
+from app.routes.auth import _hash_password
 
 router = APIRouter(prefix="/api/scout", tags=["scout"])
 
@@ -31,6 +32,7 @@ class RosterOut(BaseModel):
     name: str
     scout_id: Optional[str] = None
     active: bool = True
+    has_password: bool = False
 
     class Config:
         from_attributes = True
@@ -42,7 +44,8 @@ def list_roster(active_only: bool = False, db: Session = Depends(get_db)):
     if active_only:
         q = q.filter(ScoutRoster.active == True)  # noqa: E712
     return [
-        RosterOut(id=str(s.id), name=s.name, scout_id=s.scout_id, active=s.active)
+        RosterOut(id=str(s.id), name=s.name, scout_id=s.scout_id, active=s.active,
+                  has_password=bool(s.password_hash))
         for s in q.order_by(ScoutRoster.name).all()
     ]
 
@@ -110,7 +113,9 @@ async def import_roster_csv(file: UploadFile = File(...), db: Session = Depends(
             continue
 
         scout_id = (row.get("scout_id") or row.get("id") or "").strip() or None
-        db.add(ScoutRoster(name=name, scout_id=scout_id))
+        password = (row.get("password") or "").strip() or None
+        pw_hash = _hash_password(password) if password and len(password) >= 4 else None
+        db.add(ScoutRoster(name=name, scout_id=scout_id, password_hash=pw_hash))
         existing.add(name.lower())
         added += 1
 

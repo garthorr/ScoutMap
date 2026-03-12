@@ -11,6 +11,7 @@ let eventsData = [];
 
 // --- Auth ---
 let _authToken = localStorage.getItem("scoutmap_token") || "";
+let _loginRoster = []; // roster loaded on login screen (scouts with passwords)
 
 function authFetch(url, opts = {}) {
   opts.headers = opts.headers || {};
@@ -31,6 +32,7 @@ function _showLoginOverlay() {
   document.getElementById("login-overlay").classList.add("active");
   document.querySelector("header").style.display = "none";
   document.querySelector(".container").style.display = "none";
+  _loadLoginRoster();
 }
 function _hideLoginOverlay() {
   document.getElementById("login-overlay").classList.remove("active");
@@ -38,6 +40,74 @@ function _hideLoginOverlay() {
   document.querySelector(".container").style.display = "";
 }
 
+// Load scouts with passwords for the login dropdown (public endpoint)
+async function _loadLoginRoster() {
+  const sel = document.getElementById("login-scout-select");
+  try {
+    const r = await fetch(API + "/api/auth/scout-roster");
+    _loginRoster = await r.json();
+  } catch {
+    _loginRoster = [];
+  }
+  if (_loginRoster.length) {
+    sel.innerHTML = '<option value="">Select your name...</option>' +
+      _loginRoster.map(s => `<option value="${s.id}">${s.name}${s.scout_id ? " (" + s.scout_id + ")" : ""}</option>`).join("");
+  } else {
+    sel.innerHTML = '<option value="">No scouts available</option>';
+  }
+}
+
+// Toggle between scout and admin login views
+function showAdminLogin() {
+  document.getElementById("login-step-scout").style.display = "none";
+  document.getElementById("login-step-email").style.display = "";
+  document.getElementById("login-step-code").style.display = "none";
+}
+function showScoutLogin() {
+  document.getElementById("login-step-scout").style.display = "";
+  document.getElementById("login-step-email").style.display = "none";
+  document.getElementById("login-step-code").style.display = "none";
+}
+
+// Scout password login
+async function scoutPasswordLogin() {
+  const scoutId = document.getElementById("login-scout-select").value;
+  const password = document.getElementById("login-scout-password").value;
+  const errEl = document.getElementById("login-scout-error");
+  errEl.style.display = "none";
+
+  if (!scoutId) { errEl.textContent = "Select your name."; errEl.style.display = ""; return; }
+  if (!password) { errEl.textContent = "Enter your password."; errEl.style.display = ""; return; }
+
+  const btn = document.getElementById("login-scout-btn");
+  btn.disabled = true; btn.textContent = "Signing in…";
+  try {
+    const r = await fetch(API + "/api/auth/scout-login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scout_id: scoutId, password }),
+    });
+    const data = await r.json();
+    if (r.ok && data.token) {
+      _authToken = data.token;
+      localStorage.setItem("scoutmap_token", _authToken);
+      // Pre-fill scout info from login response
+      scoutName = data.scout_name;
+      scoutIdNum = data.scout_id || "";
+      localStorage.setItem("scoutmap_scout", JSON.stringify({
+        name: data.scout_name, id: data.scout_id || "", roster_id: data.roster_id
+      }));
+      _hideLoginOverlay();
+      loadRoster(); loadEvents();
+    } else {
+      errEl.textContent = data.detail || "Invalid credentials."; errEl.style.display = "";
+    }
+  } catch (err) {
+    errEl.textContent = "Network error: " + err.message; errEl.style.display = "";
+  }
+  btn.disabled = false; btn.textContent = "Sign In";
+}
+
+// Admin email OTP login
 async function scoutLoginRequestCode() {
   const email = document.getElementById("login-email").value.trim();
   const errEl = document.getElementById("login-email-error");
@@ -100,6 +170,9 @@ function scoutLoginBackToEmail() {
   document.getElementById("login-step-code").style.display = "none";
 }
 
+document.getElementById("login-scout-password").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); scoutPasswordLogin(); }
+});
 document.getElementById("login-email").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); scoutLoginRequestCode(); }
 });
