@@ -8,44 +8,56 @@
     :root {
       --sa-red: #CE1126;
       --sa-blue: #003F87;
-      --sa-tan: #D6CEBD;
       --sa-gray: #515354;
       --sa-white: #FFFFFF;
       --sa-dark-blue: #003366;
-      --sa-light-tan: #E9E9E4;
       --sa-dark-gray: #232528;
       --sa-pale-gray: #858787;
+      --border: #e2e2de;
+      --bg-page: #f0efeb;
+      --bg-subtle: #f7f7f5;
+      --radius: 8px;
+      --transition: .15s ease;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--sa-light-tan);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      background: var(--bg-page);
       color: var(--sa-dark-gray);
       min-height: 100vh;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
     }
     header {
-      background: linear-gradient(180deg, var(--sa-dark-blue) 0%, #002a5c 100%);
-      color: var(--sa-white);
-      padding: 14px 20px;
-      border-bottom: 3px solid var(--sa-red);
+      background: var(--sa-white);
+      color: var(--sa-dark-gray);
+      padding: 0 16px;
+      height: 48px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       position: sticky;
       top: 0;
       z-index: 100;
+      box-shadow: 0 1px 0 var(--border);
     }
-    header h1 { font-size: 18px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+    header h1 {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--sa-dark-blue);
+      letter-spacing: -.2px;
+    }
     .header-right {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
     #scout-info-badge {
       font-size: 12px;
-      background: rgba(255,255,255,.15);
-      padding: 4px 10px;
-      border-radius: 12px;
+      color: var(--sa-gray);
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--bg-subtle);
       max-width: 140px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -53,41 +65,40 @@
     }
     #logout-btn {
       font-size: 12px;
-      background: rgba(255,255,255,.2);
-      color: var(--sa-white);
-      border: 1px solid rgba(255,255,255,.3);
+      background: none;
+      color: var(--sa-pale-gray);
+      border: 1px solid var(--border);
       padding: 4px 10px;
-      border-radius: 12px;
+      border-radius: 4px;
       cursor: pointer;
-      text-transform: uppercase;
-      letter-spacing: .3px;
-      font-weight: 600;
+      font-weight: 500;
     }
-    #logout-btn:hover { background: rgba(255,255,255,.35); }
+    #logout-btn:hover { background: var(--bg-subtle); color: var(--sa-dark-gray); }
     .container {
-      max-width: 600px;
+      max-width: 540px;
       margin: 0 auto;
       padding: 16px;
     }
     .card {
       background: var(--sa-white);
-      border-radius: 10px;
+      border-radius: var(--radius);
       padding: 20px;
-      margin-bottom: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.08);
-      border-top: 3px solid var(--sa-blue);
+      margin-bottom: 12px;
+      border: 1px solid var(--border);
     }
     .card h2 {
-      font-size: 18px;
-      color: var(--sa-dark-blue);
+      font-size: 16px;
+      color: var(--sa-dark-gray);
       margin-bottom: 14px;
       padding-bottom: 8px;
-      border-bottom: 2px solid var(--sa-red);
+      border-bottom: 2px solid var(--border);
+      font-weight: 700;
+      letter-spacing: -.2px;
     }
     .field { margin-bottom: 14px; }
     .field label {
       display: block;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
       color: var(--sa-gray);
       margin-bottom: 4px;
@@ -97,96 +108,94 @@
     .field input, .field select, .field textarea {
       width: 100%;
       padding: 10px 12px;
-      border: 1px solid #c5c5c5;
-      border-radius: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
       font-size: 16px;
       background: var(--sa-white);
       -webkit-appearance: none;
+      transition: border-color var(--transition), box-shadow var(--transition);
     }
     .field input:focus, .field select:focus, .field textarea:focus {
       outline: none;
       border-color: var(--sa-blue);
-      box-shadow: 0 0 0 3px rgba(0,63,135,.15);
+      box-shadow: 0 0 0 3px rgba(0,63,135,.1);
     }
     .field textarea { height: 70px; resize: vertical; }
-    /* Other name write-in — hidden by default */
     #other-name-wrap { display: none; margin-top: 8px; }
     #other-name-wrap.visible { display: block; }
     .btn {
       display: block;
       width: 100%;
-      padding: 14px;
-      background: var(--sa-red);
+      padding: 12px;
+      background: var(--sa-dark-blue);
       color: var(--sa-white);
       border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      font-weight: 700;
+      border-radius: 6px;
+      font-size: 15px;
+      font-weight: 600;
       cursor: pointer;
-      text-transform: uppercase;
-      letter-spacing: .5px;
-      transition: background .15s;
+      transition: background var(--transition);
     }
-    .btn:hover { background: #a80d1e; }
+    .btn:hover { background: #002a5c; }
     .btn:disabled { background: #ccc; cursor: not-allowed; }
     .btn-outline {
       background: transparent;
-      border: 2px solid var(--sa-blue);
-      color: var(--sa-blue);
+      border: 1px solid var(--sa-dark-blue);
+      color: var(--sa-dark-blue);
     }
-    .btn-outline:hover { background: rgba(0,63,135,.08); }
+    .btn-outline:hover { background: rgba(0,51,102,.05); }
 
     /* House list */
     .house-item {
       display: flex;
       align-items: center;
-      padding: 14px 16px;
-      border-bottom: 1px solid #e8e8e4;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
       gap: 12px;
       cursor: pointer;
-      transition: background .1s;
+      transition: background var(--transition);
     }
     .house-item:last-child { border-bottom: none; }
-    .house-item:active { background: #f0f4f8; }
+    .house-item:active { background: var(--bg-subtle); }
     .house-num {
-      width: 28px; height: 28px; border-radius: 50%;
-      background: var(--sa-blue); color: var(--sa-white);
+      width: 26px; height: 26px; border-radius: 50%;
+      background: var(--sa-dark-blue); color: var(--sa-white);
       display: flex; align-items: center; justify-content: center;
-      font-size: 12px; font-weight: 700; flex-shrink: 0;
+      font-size: 11px; font-weight: 700; flex-shrink: 0;
     }
     .house-num.done { background: #059669; }
     .house-num.avoid { background: var(--sa-red); }
     .house-details { flex: 1; min-width: 0; }
     .house-addr {
-      font-size: 15px; font-weight: 600; color: var(--sa-dark-gray);
+      font-size: 14px; font-weight: 600; color: var(--sa-dark-gray);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .house-status { font-size: 12px; color: var(--sa-pale-gray); margin-top: 2px; }
-    .house-arrow { color: var(--sa-pale-gray); font-size: 18px; flex-shrink: 0; }
+    .house-status { font-size: 12px; color: var(--sa-pale-gray); margin-top: 1px; }
+    .house-arrow { color: var(--sa-pale-gray); font-size: 16px; flex-shrink: 0; }
 
     /* Toggle buttons */
     .toggle-group {
-      display: flex; gap: 0; border-radius: 8px; overflow: hidden;
-      border: 2px solid #c5c5c5;
+      display: flex; gap: 0; border-radius: 6px; overflow: hidden;
+      border: 1px solid var(--border);
     }
     .toggle-btn {
-      flex: 1; padding: 12px; border: none; background: var(--sa-white);
-      font-size: 15px; font-weight: 600; cursor: pointer; color: var(--sa-gray);
-      transition: background .1s, color .1s;
+      flex: 1; padding: 10px; border: none; background: var(--sa-white);
+      font-size: 14px; font-weight: 600; cursor: pointer; color: var(--sa-gray);
+      transition: background var(--transition), color var(--transition);
     }
-    .toggle-btn + .toggle-btn { border-left: 1px solid #c5c5c5; }
+    .toggle-btn + .toggle-btn { border-left: 1px solid var(--border); }
     .toggle-btn.active-yes { background: #059669; color: var(--sa-white); }
     .toggle-btn.active-no { background: var(--sa-red); color: var(--sa-white); }
 
     /* Checkbox */
     .checkbox-field { display: flex; align-items: center; gap: 10px; padding: 12px 0; }
-    .checkbox-field input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--sa-red); }
-    .checkbox-field label { font-size: 15px; font-weight: 600; color: var(--sa-dark-gray); margin: 0; }
+    .checkbox-field input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--sa-dark-blue); }
+    .checkbox-field label { font-size: 14px; font-weight: 500; color: var(--sa-dark-gray); margin: 0; }
 
     /* Progress */
-    .progress-bar { background: #e5e7eb; border-radius: 6px; height: 8px; margin: 12px 0; overflow: hidden; }
-    .progress-fill { height: 100%; background: #059669; border-radius: 6px; transition: width .3s; }
-    .progress-text { font-size: 13px; color: var(--sa-pale-gray); text-align: center; }
+    .progress-bar { background: var(--border); border-radius: 4px; height: 6px; margin: 10px 0; overflow: hidden; }
+    .progress-fill { height: 100%; background: #059669; border-radius: 4px; transition: width .3s; }
+    .progress-text { font-size: 12px; color: var(--sa-pale-gray); text-align: center; }
 
     .screen { display: none; }
     .screen.active { display: block; }
@@ -194,18 +203,55 @@
     #donation-amount-wrap { display: none; margin-top: 10px; }
     #donation-amount-wrap.visible { display: block; }
 
-    .btn-row { display: flex; gap: 10px; margin-top: 16px; }
+    .btn-row { display: flex; gap: 10px; margin-top: 14px; }
     .btn-row .btn { flex: 1; }
 
-    .error-msg { color: var(--sa-red); font-size: 14px; margin-top: 8px; font-weight: 600; }
+    .error-msg { color: var(--sa-red); font-size: 13px; margin-top: 8px; font-weight: 600; }
+
+    /* Login */
+    .login-card {
+      background: var(--sa-white);
+      border-radius: var(--radius);
+      padding: 32px 28px;
+      border: 1px solid var(--border);
+      text-align: center;
+      max-width: 380px;
+      margin: 60px auto;
+    }
+    .login-card h2 {
+      font-size: 20px;
+      border-bottom: none;
+      padding-bottom: 0;
+      margin-bottom: 4px;
+      color: var(--sa-dark-blue);
+      letter-spacing: -.3px;
+    }
+    .login-card .login-subtitle {
+      font-size: 12px;
+      color: var(--sa-pale-gray);
+      margin-bottom: 20px;
+      letter-spacing: .3px;
+    }
+    .login-switch {
+      background: none;
+      color: var(--sa-blue);
+      border: none;
+      font-size: 13px;
+      margin-top: 14px;
+      cursor: pointer;
+      font-weight: 500;
+      padding: 4px;
+    }
+    .login-switch:hover { text-decoration: underline; background: none; }
   </style>
 </head>
 <body>
   <!-- Login Overlay -->
   <div id="login-overlay" class="screen active">
-    <div style="max-width:380px;margin:60px auto;padding:0 16px;">
-      <div class="card" style="text-align:center;">
-        <h2 style="border-bottom-color:var(--sa-blue);">⚜ ScoutMap Login</h2>
+    <div style="padding:0 16px;">
+      <div class="login-card">
+        <h2>ScoutMap</h2>
+        <p class="login-subtitle">Field Entry</p>
 
         <!-- Scout password login (default) -->
         <div id="login-step-scout">
@@ -221,7 +267,7 @@
           </div>
           <button class="btn" id="login-scout-btn" onclick="scoutPasswordLogin()">Sign In</button>
           <p id="login-scout-error" class="error-msg" style="display:none"></p>
-          <button class="btn btn-outline" onclick="showAdminLogin()" style="margin-top:14px;font-size:13px;">Admin Sign In</button>
+          <button class="login-switch" onclick="showAdminLogin()">Admin Sign In</button>
         </div>
 
         <!-- Admin password login -->
@@ -232,7 +278,7 @@
           </div>
           <button class="btn" id="login-admin-btn" onclick="scoutAdminLogin()">Sign In</button>
           <p id="login-admin-error" class="error-msg" style="display:none"></p>
-          <button class="btn btn-outline" onclick="showScoutLogin()" style="margin-top:14px;font-size:13px;">Scout Sign In</button>
+          <button class="login-switch" onclick="showScoutLogin()">Scout Sign In</button>
         </div>
       </div>
     </div>

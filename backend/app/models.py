@@ -44,7 +44,7 @@ class MasterHouse(Base):
     unit = Column(String(50))
     city = Column(String(100), default="Dallas")
     state = Column(String(2), default="TX")
-    zip_code = Column(String(10))
+    zip_code = Column(String(10), index=True)
     full_address = Column(String(500), nullable=False)
     normalized_address = Column(String(500), nullable=False, index=True)
 
@@ -88,8 +88,8 @@ class HouseSourceLink(Base):
     __tablename__ = "house_source_links"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    house_id = Column(UUID(as_uuid=True), ForeignKey("master_houses.id"), nullable=False)
-    source_import_id = Column(UUID(as_uuid=True), ForeignKey("source_imports.id"), nullable=False)
+    house_id = Column(UUID(as_uuid=True), ForeignKey("master_houses.id"), nullable=False, index=True)
+    source_import_id = Column(UUID(as_uuid=True), ForeignKey("source_imports.id"), nullable=False, index=True)
     source_name = Column(String(100), nullable=False)
     source_record_id = Column(String(200))
     source_last_updated = Column(DateTime)
@@ -129,8 +129,8 @@ class EventHouse(Base):
     __tablename__ = "event_houses"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    event_id = Column(UUID(as_uuid=True), ForeignKey("fundraiser_events.id"), nullable=False)
-    house_id = Column(UUID(as_uuid=True), ForeignKey("master_houses.id"), nullable=False)
+    event_id = Column(UUID(as_uuid=True), ForeignKey("fundraiser_events.id"), nullable=False, index=True)
+    house_id = Column(UUID(as_uuid=True), ForeignKey("master_houses.id"), nullable=False, index=True)
     assigned_to = Column(String(200))
     priority = Column(Integer, default=0)
     status = Column(String(30), default="pending")          # pending / visited / skipped
@@ -152,7 +152,7 @@ class Visit(Base):
     __tablename__ = "visits"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    event_house_id = Column(UUID(as_uuid=True), ForeignKey("event_houses.id"), nullable=False)
+    event_house_id = Column(UUID(as_uuid=True), ForeignKey("event_houses.id"), nullable=False, index=True)
     visited_at = Column(DateTime, default=datetime.utcnow)
     outcome = Column(String(50))                             # donated / pledged / not_home / refused / other
     donation_amount = Column(Float)

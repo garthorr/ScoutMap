@@ -118,12 +118,47 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> str:
     return session.email
 
 
+def require_admin(request: Request, db: Session = Depends(get_db)) -> str:
+    """Like get_current_user but rejects scout sessions.
+
+    Admin sessions have email="admin" or a real email address.
+    Scout sessions have email="scout:{uuid}".
+    """
+    email = get_current_user(request, db)
+    if email.startswith("scout:"):
+        raise HTTPException(403, "Admin access required")
+    return email
+
+
+# ---------------------------------------------------------------------------
+# Simple in-memory rate limiter for auth endpoints
+# ---------------------------------------------------------------------------
+_rate_limit_store: dict[str, list[float]] = {}  # key -> list of timestamps
+_RATE_LIMIT_WINDOW = 300  # 5 minutes
+_RATE_LIMIT_MAX = 10      # max attempts per window
+
+
+def _check_rate_limit(key: str):
+    """Raise 429 if too many attempts for key within the window."""
+    import time
+    now = time.time()
+    window_start = now - _RATE_LIMIT_WINDOW
+
+    attempts = _rate_limit_store.get(key, [])
+    attempts = [t for t in attempts if t > window_start]
+    if len(attempts) >= _RATE_LIMIT_MAX:
+        raise HTTPException(429, "Too many attempts. Please try again later.")
+    attempts.append(now)
+    _rate_limit_store[key] = attempts
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 @router.post("/request-code")
-def request_code(body: RequestCodeBody, db: Session = Depends(get_db)):
+def request_code(body: RequestCodeBody, request: Request, db: Session = Depends(get_db)):
     """Send a 6-digit login code to the given email if it's allowed."""
+    _check_rate_limit(f"code:{request.client.host}")
     email = body.email.strip().lower()
     if not email or "@" not in email:
         raise HTTPException(400, "Invalid email address")
@@ -154,8 +189,9 @@ def request_code(body: RequestCodeBody, db: Session = Depends(get_db)):
 
 
 @router.post("/verify-code")
-def verify_code(body: VerifyCodeBody, db: Session = Depends(get_db)):
+def verify_code(body: VerifyCodeBody, request: Request, db: Session = Depends(get_db)):
     """Verify the OTP code and create a session."""
+    _check_rate_limit(f"verify:{request.client.host}")
     email = body.email.strip().lower()
     code = body.code.strip()
 
@@ -192,8 +228,9 @@ class AdminLoginBody(BaseModel):
 
 
 @router.post("/admin-login")
-def admin_login(body: AdminLoginBody, db: Session = Depends(get_db)):
+def admin_login(body: AdminLoginBody, request: Request, db: Session = Depends(get_db)):
     """Authenticate with the master admin password."""
+    _check_rate_limit(f"admin:{request.client.host}")
     if not settings.admin_password:
         raise HTTPException(403, "Admin password login is not configured")
 
@@ -242,7 +279,7 @@ class AllowedEmailBody(BaseModel):
 
 @router.get("/allowed-emails")
 def list_allowed_emails(
-    email: str = Depends(get_current_user),
+    email: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     rows = db.query(AllowedEmail).order_by(AllowedEmail.email).all()
@@ -252,7 +289,7 @@ def list_allowed_emails(
 @router.post("/allowed-emails")
 def add_allowed_email(
     body: AllowedEmailBody,
-    email: str = Depends(get_current_user),
+    email: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     normalized = body.email.strip().lower()
@@ -268,7 +305,7 @@ def add_allowed_email(
 @router.delete("/allowed-emails/{email_id}")
 def remove_allowed_email(
     email_id: str,
-    email: str = Depends(get_current_user),
+    email: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     row = db.query(AllowedEmail).filter(AllowedEmail.id == email_id).first()
@@ -320,8 +357,9 @@ def public_scout_roster(db: Session = Depends(get_db)):
 
 
 @router.post("/scout-login")
-def scout_login(body: ScoutLoginBody, db: Session = Depends(get_db)):
+def scout_login(body: ScoutLoginBody, request: Request, db: Session = Depends(get_db)):
     """Authenticate a scout by roster ID + password. Returns a session token."""
+    _check_rate_limit(f"scout:{request.client.host}")
     scout = db.query(ScoutRoster).filter(
         ScoutRoster.id == body.scout_id,
         ScoutRoster.active == True,  # noqa: E712
@@ -362,7 +400,7 @@ class SetScoutPasswordBody(BaseModel):
 def set_scout_password(
     roster_id: str,
     body: SetScoutPasswordBody,
-    email: str = Depends(get_current_user),
+    email: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Admin sets or resets a scout's password."""
@@ -372,6 +410,8 @@ def set_scout_password(
     if len(body.password) < 4:
         raise HTTPException(400, "Password must be at least 4 characters")
     scout.password_hash = _hash_password(body.password)
+    # Invalidate existing sessions for this scout
+    db.query(AuthSession).filter(AuthSession.email == f"scout:{roster_id}").delete()
     db.commit()
     return {"ok": True, "name": scout.name}
 
@@ -379,7 +419,7 @@ def set_scout_password(
 @router.delete("/scout-password/{roster_id}")
 def clear_scout_password(
     roster_id: str,
-    email: str = Depends(get_current_user),
+    email: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Admin clears a scout's password (disables password login)."""
@@ -387,5 +427,6 @@ def clear_scout_password(
     if not scout:
         raise HTTPException(404, "Scout not found")
     scout.password_hash = None
+    db.query(AuthSession).filter(AuthSession.email == f"scout:{roster_id}").delete()
     db.commit()
     return {"ok": True}

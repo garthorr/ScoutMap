@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models import MasterHouse, HouseSourceLink, EventHouse, Visit, UnmatchedRecord
 from app.schemas import MasterHouseOut, MasterHouseCreate
 from app.address import normalize_address, parse_address_parts
+from app.routes.auth import require_admin
 
 router = APIRouter(prefix="/api/houses", tags=["houses"])
 
@@ -96,7 +97,7 @@ def get_house(house_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=MasterHouseOut)
-def create_house_manual(body: MasterHouseCreate, db: Session = Depends(get_db)):
+def create_house_manual(body: MasterHouseCreate, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Admin manually adds a house that is missing from public data."""
     norm = normalize_address(body.full_address)
     existing = db.query(MasterHouse).filter(MasterHouse.normalized_address == norm).first()
@@ -146,7 +147,7 @@ def _delete_house(house_id: str, db: Session):
 
 
 @router.delete("/{house_id}")
-def delete_house(house_id: str, db: Session = Depends(get_db)):
+def delete_house(house_id: str, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Delete a house and all related records."""
     if not _delete_house(house_id, db):
         raise HTTPException(404, "House not found")
@@ -159,7 +160,7 @@ class BatchDeleteBody(BaseModel):
 
 
 @router.post("/batch-delete")
-def batch_delete_houses(body: BatchDeleteBody, db: Session = Depends(get_db)):
+def batch_delete_houses(body: BatchDeleteBody, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Delete multiple houses at once (used by map erase tool)."""
     deleted = 0
     for hid in body.house_ids:

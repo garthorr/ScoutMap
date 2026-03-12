@@ -2,6 +2,12 @@
 const API = "";
 let map, currentEventId, currentEventName;
 
+/** Escape HTML entities to prevent XSS when inserting user data into innerHTML. */
+function esc(s) {
+  if (s == null) return "";
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 // --- Auth ---
 let _authToken = localStorage.getItem("scoutmap_token") || "";
 
@@ -191,9 +197,9 @@ async function loadAllowedEmails() {
   if (!emails.length) { el.innerHTML = "<p>No allowed emails configured.</p>"; return; }
   el.innerHTML = `<table><tr><th>Email / Pattern</th><th>Added</th><th></th></tr>` +
     emails.map(e => `<tr>
-      <td>${e.email}</td>
+      <td>${esc(e.email)}</td>
       <td>${new Date(e.created_at).toLocaleDateString()}</td>
-      <td><button class="btn-sm btn-danger" onclick="removeAllowedEmail('${e.id}')">Remove</button></td>
+      <td><button class="btn-sm btn-danger" onclick="removeAllowedEmail('${esc(e.id)}')">Remove</button></td>
     </tr>`).join("") + `</table>`;
 }
 
@@ -371,7 +377,8 @@ function initMap() {
       "Selected Streets": streetHighlightLayer,
     }).addTo(map);
 
-    map.on("moveend", refreshMapDots);
+    let _mapMoveTimer;
+    map.on("moveend", () => { clearTimeout(_mapMoveTimer); _mapMoveTimer = setTimeout(refreshMapDots, 300); });
     map.on("click", _handleMapToolClick);
     refreshMapDots();
     _loadMapEventSelect();
@@ -395,7 +402,7 @@ async function refreshMapDots() {
       radius: 4, fillColor: "#003F87", color: "#003F87",
       weight: 1, opacity: 0.8, fillOpacity: 0.6,
     });
-    dot.bindPopup(`<b>${h.full_address}</b><br>${h.owner_name || ""}<br>` +
+    dot.bindPopup(`<b>${esc(h.full_address)}</b><br>${esc(h.owner_name)}<br>` +
       (h.total_appraised_value ? `Appraised: $${h.total_appraised_value.toLocaleString()}` : ""));
     _setupEraseOnDot(dot, h.id, h.full_address);
     houseDotLayer.addLayer(dot);
@@ -408,7 +415,7 @@ async function _loadMapEventSelect() {
     const r = await authFetch(API + "/api/events/");
     const events = await r.json();
     sel.innerHTML = '<option value="">Walk Groups: none</option>' +
-      events.map(e => `<option value="${e.id}">${e.name} (${e.house_count})</option>`).join("");
+      events.map(e => `<option value="${esc(e.id)}">${esc(e.name)} (${e.house_count})</option>`).join("");
   } catch { /* ignore */ }
 }
 
@@ -462,7 +469,7 @@ async function loadWalkRoutes(eventId) {
         const line = L.polyline(midCoords, {
           color, weight: 5, opacity: 0.7, lineCap: "round", lineJoin: "round",
         });
-        line.bindPopup(`<b>${label}</b><br>${street}<br>${streetHouses.length} houses`);
+        line.bindPopup(`<b>${esc(label)}</b><br>${esc(street)}<br>${streetHouses.length} houses`);
         walkRouteLayer.addLayer(line);
       }
     }
@@ -473,7 +480,7 @@ async function loadWalkRoutes(eventId) {
         radius: 5, fillColor: color, color: "#fff",
         weight: 2, fillOpacity: 1,
       });
-      dot.bindPopup(`<b>${eh.house.full_address}</b><br>Group: ${label}<br>Status: ${eh.status}`);
+      dot.bindPopup(`<b>${esc(eh.house.full_address)}</b><br>Group: ${esc(label)}<br>Status: ${esc(eh.status)}`);
       walkRouteLayer.addLayer(dot);
     });
   }
@@ -567,8 +574,8 @@ function renderStreetCheckboxes() {
   el.innerHTML = visible.map(s => {
     const checked = _selectedStreets.has(s.street) ? " checked" : "";
     return `<label style="display:block;margin-bottom:4px;font-size:13px;cursor:pointer;break-inside:avoid;">` +
-      `<input type="checkbox" value="${s.street}" onchange="toggleStreet(this)"${checked} /> ` +
-      `${s.street} <span style="color:var(--sa-pale-gray);">(${s.count})</span></label>`;
+      `<input type="checkbox" value="${esc(s.street)}" onchange="toggleStreet(this)"${checked} /> ` +
+      `${esc(s.street)} <span style="color:var(--sa-pale-gray);">(${s.count})</span></label>`;
   }).join("");
   _updateSelectionSummary();
 }
@@ -635,7 +642,7 @@ function _highlightSelectedStreets() {
         color: "#CE1126", weight: 5, opacity: 0.8,
         lineCap: "round", lineJoin: "round",
       });
-      line.bindPopup(`<b>${s.street}</b><br>${s.count} houses`);
+      line.bindPopup(`<b>${esc(s.street)}</b><br>${s.count} houses`);
       streetHighlightLayer.addLayer(line);
     }
 
@@ -645,7 +652,7 @@ function _highlightSelectedStreets() {
         radius: 4, fillColor: "#CE1126", color: "#fff",
         weight: 1.5, fillOpacity: 1,
       });
-      dot.bindPopup(h.address);
+      dot.bindPopup(esc(h.address));
       streetHighlightLayer.addLayer(dot);
     });
   });
@@ -843,10 +850,10 @@ async function loadEvents() {
   document.getElementById("events-list").innerHTML = events.length
     ? `<table><tr><th>Name</th><th>Date</th><th>Houses</th><th></th></tr>` +
       events.map(e => `<tr>
-        <td>${e.name}</td>
+        <td>${esc(e.name)}</td>
         <td>${e.event_date ? new Date(e.event_date).toLocaleDateString() : "—"}</td>
         <td>${e.house_count}</td>
-        <td><button class="btn-sm" onclick="openEvent('${e.id}','${e.name}')">Open</button></td>
+        <td><button class="btn-sm" onclick="openEvent('${esc(e.id)}','${esc(e.name)}')">Open</button></td>
       </tr>`).join("") + `</table>`
     : "<p>No events yet.</p>";
 }
@@ -895,14 +902,14 @@ function _renderGroupedHouses(houses, { openByDefault = false } = {}) {
   let html = "";
   for (const [label, items] of Object.entries(groups)) {
     const visited = items.filter(eh => eh.status === "visited").length;
-    html += `<details${openByDefault ? " open" : ""}><summary><strong>${label}</strong> — ${items.length} houses, ${visited} visited</summary>`;
+    html += `<details${openByDefault ? " open" : ""}><summary><strong>${esc(label)}</strong> — ${items.length} houses, ${visited} visited</summary>`;
     html += `<table><tr><th>#</th><th>Address</th><th>Owner</th><th>Status</th><th></th></tr>`;
     html += items.map((eh, idx) => `<tr>
       <td>${idx + 1}</td>
-      <td>${eh.house.full_address}</td>
-      <td>${eh.house.owner_name || "—"}</td>
-      <td><span class="badge badge-${eh.status}">${eh.status}</span></td>
-      <td><button class="btn-sm" onclick="openVisitModal('${currentEventId}','${eh.id}','${eh.house.full_address.replace(/'/g, "\\'")}')">Visit</button></td>
+      <td>${esc(eh.house.full_address)}</td>
+      <td>${esc(eh.house.owner_name) || "—"}</td>
+      <td><span class="badge badge-${esc(eh.status)}">${esc(eh.status)}</span></td>
+      <td><button class="btn-sm" onclick="openVisitModal('${esc(currentEventId)}','${esc(eh.id)}','${esc(eh.house.full_address)}')">Visit</button></td>
     </tr>`).join("");
     html += `</table></details>`;
   }
@@ -953,7 +960,7 @@ async function loadWalkGroupEvents() {
     sel.innerHTML = '<option value="">Select an event…</option>' +
       events.map(ev => {
         const selected = String(ev.id) === String(currentEventId) ? " selected" : "";
-        return `<option value="${ev.id}"${selected}>${ev.name} (${ev.house_count} houses)</option>`;
+        return `<option value="${esc(ev.id)}"${selected}>${esc(ev.name)} (${ev.house_count} houses)</option>`;
       }).join("");
     if (currentEventId) loadWalkGroupList();
   } catch (err) {
@@ -1063,7 +1070,7 @@ async function loadVisitRoster() {
     const r = await authFetch(API + "/api/scout/roster?active_only=true");
     const roster = await r.json();
     sel.innerHTML = '<option value="">Select volunteer...</option>' +
-      roster.map(s => `<option value="${s.name}">${s.name}${s.scout_id ? " (" + s.scout_id + ")" : ""}</option>`).join("") +
+      roster.map(s => `<option value="${esc(s.name)}">${esc(s.name)}${s.scout_id ? " (" + esc(s.scout_id) + ")" : ""}</option>`).join("") +
       '<option value="__other__">Other (write in)</option>';
   } catch {
     sel.innerHTML = '<option value="">Select volunteer...</option><option value="__other__">Other (write in)</option>';
@@ -1253,10 +1260,10 @@ async function loadHouses() {
   document.getElementById("houses-list").innerHTML = houses.length
     ? `<table><tr><th>Address</th><th>City</th><th>ZIP</th><th>Owner</th><th>Source</th></tr>` +
       houses.map(h => `<tr>
-        <td>${h.full_address}</td>
-        <td>${h.city || ""}</td>
-        <td>${h.zip_code || ""}</td>
-        <td>${h.owner_name || "—"}</td>
+        <td>${esc(h.full_address)}</td>
+        <td>${esc(h.city)}</td>
+        <td>${esc(h.zip_code)}</td>
+        <td>${esc(h.owner_name) || "—"}</td>
         <td>${h.manually_created ? "Manual" : "Imported"}</td>
       </tr>`).join("") + `</table>`
     : "<p>No houses found.</p>";
@@ -1305,17 +1312,17 @@ async function loadRoster() {
   document.getElementById("roster-list").innerHTML = roster.length
     ? `<table><tr><th>Name</th><th>Scout ID</th><th>Status</th><th>Password</th><th></th></tr>` +
       roster.map(s => `<tr>
-        <td>${s.name}</td>
-        <td>${s.scout_id || "—"}</td>
+        <td>${esc(s.name)}</td>
+        <td>${esc(s.scout_id) || "—"}</td>
         <td><span class="badge badge-${s.active ? "completed" : "pending"}">${s.active ? "Active" : "Inactive"}</span></td>
         <td>${s.has_password
-          ? '<span class="badge badge-completed">Set</span> <button class="btn-sm" onclick="clearScoutPassword(\'' + s.id + '\')">Clear</button>'
+          ? '<span class="badge badge-completed">Set</span> <button class="btn-sm" onclick="clearScoutPassword(\'' + esc(s.id) + '\')">Clear</button>'
           : '<span class="badge badge-pending">None</span>'
         }</td>
         <td>
-          <button class="btn-sm" onclick="promptScoutPassword('${s.id}', '${s.name.replace(/'/g, "\\'")}')">Set Password</button>
-          <button class="btn-sm" onclick="toggleRosterScout('${s.id}')">${s.active ? "Deactivate" : "Activate"}</button>
-          <button class="btn-sm btn-danger" onclick="deleteRosterScout('${s.id}')">Delete</button>
+          <button class="btn-sm" onclick="promptScoutPassword('${esc(s.id)}', '${esc(s.name)}')">Set Password</button>
+          <button class="btn-sm" onclick="toggleRosterScout('${esc(s.id)}')">${s.active ? "Deactivate" : "Activate"}</button>
+          <button class="btn-sm btn-danger" onclick="deleteRosterScout('${esc(s.id)}')">Delete</button>
         </td>
       </tr>`).join("") + `</table>`
     : "<p>No scouts in roster. Add scouts above.</p>";
@@ -1402,7 +1409,7 @@ async function loadScoutDataEvents() {
   const r = await authFetch(API + "/api/events/");
   const events = await r.json();
   sel.innerHTML = '<option value="">All Events</option>' +
-    events.map(e => `<option value="${e.id}">${e.name}</option>`).join("");
+    events.map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join("");
 }
 
 let _scoutDataCache = [];
@@ -1425,8 +1432,8 @@ async function loadScoutData() {
       `<p style="margin-bottom:8px"><strong>${summary.total_visits}</strong> total visits &middot; <strong>$${summary.total_donations.toLocaleString()}</strong> donated</p>` +
       `<table><tr><th>Scout</th><th>ID</th><th>Visits</th><th>Doors</th><th>Donations</th><th>$ Total</th><th>Former</th><th>Avoid</th></tr>` +
       summary.scouts.map(s => `<tr>
-        <td>${s.scout_name}</td>
-        <td>${s.scout_id || "—"}</td>
+        <td>${esc(s.scout_name)}</td>
+        <td>${esc(s.scout_id) || "—"}</td>
         <td>${s.total_visits}</td>
         <td>${s.doors_answered}</td>
         <td>${s.donations}</td>
@@ -1444,15 +1451,15 @@ async function loadScoutData() {
     listEl.innerHTML = `<table><tr><th>Time</th><th>Scout</th><th>Address</th><th>Group</th><th>Door</th><th>Donation</th><th>Amount</th><th>Former</th><th>Avoid</th><th>Notes</th></tr>` +
       data.map(v => `<tr>
         <td>${v.visited_at ? new Date(v.visited_at).toLocaleString() : "—"}</td>
-        <td>${v.scout_name}</td>
-        <td>${v.address}</td>
-        <td>${v.group_label || "—"}</td>
+        <td>${esc(v.scout_name)}</td>
+        <td>${esc(v.address)}</td>
+        <td>${esc(v.group_label) || "—"}</td>
         <td>${v.door_answer == null ? "—" : v.door_answer ? "Yes" : "No"}</td>
         <td>${v.donation_given == null ? "—" : v.donation_given ? "Yes" : "No"}</td>
         <td>${v.donation_amount ? "$" + v.donation_amount : "—"}</td>
         <td>${v.former_scout == null ? "—" : v.former_scout ? "Yes" : "No"}</td>
         <td>${v.avoid_house ? "YES" : "—"}</td>
-        <td>${v.notes || ""}</td>
+        <td>${esc(v.notes)}</td>
       </tr>`).join("") + `</table>`;
   } else {
     listEl.innerHTML = "<p>No visit data yet. Scouts record data at <a href='/scout' target='_blank'>/scout</a>.</p>";
