@@ -849,14 +849,83 @@ async function loadEvents() {
   const r = await authFetch(API + "/api/events/");
   const events = await r.json();
   document.getElementById("events-list").innerHTML = events.length
-    ? `<table><tr><th>Name</th><th>Date</th><th>Houses</th><th></th></tr>` +
+    ? `<table><tr><th>Name</th><th>Description</th><th>Date</th><th>Houses</th><th></th></tr>` +
       events.map(e => `<tr>
         <td>${esc(e.name)}</td>
+        <td>${esc(e.description || "")}</td>
         <td>${e.event_date ? new Date(e.event_date).toLocaleDateString() : "—"}</td>
         <td>${e.house_count}</td>
-        <td><button class="btn-sm" onclick="openEvent('${esc(e.id)}','${esc(e.name)}')">Open</button></td>
+        <td>
+          <button class="btn-sm" onclick="openEvent('${esc(e.id)}','${esc(e.name)}')">Open</button>
+          <button class="btn-sm" onclick="editEvent('${esc(e.id)}')" style="margin-left:4px;">Edit</button>
+          <button class="btn-sm btn-danger" onclick="deleteEvent('${esc(e.id)}','${esc(e.name)}')" style="margin-left:4px;">Delete</button>
+        </td>
       </tr>`).join("") + `</table>`
     : "<p>No events yet.</p>";
+}
+
+async function deleteEvent(id, name) {
+  if (!confirm(`Delete event "${name}"? This will remove all assigned houses and visit records for this event.`)) return;
+  try {
+    const r = await authFetch(API + `/api/events/${id}`, { method: "DELETE" });
+    if (r.ok) {
+      loadEvents();
+      // If we were viewing this event's detail, go back
+      if (currentEventId === id) {
+        currentEventId = null;
+        currentEventName = null;
+        showPage("events");
+      }
+    } else {
+      const data = await r.json().catch(() => ({}));
+      alert(data.detail || "Failed to delete event.");
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function editEvent(id) {
+  // Fetch current event data
+  let ev;
+  try {
+    const r = await authFetch(API + `/api/events/${id}`);
+    if (!r.ok) { alert("Failed to load event."); return; }
+    ev = await r.json();
+  } catch (err) { alert("Error: " + err.message); return; }
+
+  const newName = prompt("Event name:", ev.name);
+  if (newName === null) return; // cancelled
+  const newDesc = prompt("Description:", ev.description || "");
+  if (newDesc === null) return;
+  const currentDate = ev.event_date ? ev.event_date.split("T")[0] : "";
+  const newDate = prompt("Date (YYYY-MM-DD):", currentDate);
+  if (newDate === null) return;
+
+  const body = { name: newName.trim() || ev.name };
+  body.description = newDesc.trim();
+  body.event_date = newDate.trim() ? new Date(newDate.trim()).toISOString() : "";
+
+  try {
+    const r = await authFetch(API + `/api/events/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) {
+      loadEvents();
+      // Update detail title if viewing this event
+      if (currentEventId === id) {
+        currentEventName = body.name;
+        document.getElementById("event-detail-title").textContent = body.name;
+      }
+    } else {
+      const data = await r.json().catch(() => ({}));
+      alert(data.detail || "Failed to update event.");
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
 }
 async function exportEventsCSV() {
   const r = await authFetch(API + "/api/events/");
