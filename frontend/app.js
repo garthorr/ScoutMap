@@ -261,6 +261,7 @@ function showPage(name, evt) {
   if (name === "walk-groups") loadWalkGroupEvents();
   if (name === "roster") loadRoster();
   if (name === "scout-data") { loadScoutDataEvents(); loadScoutData(); }
+  if (name === "scout-form") loadFormFields();
   if (name === "settings") loadAllowedEmails();
 }
 
@@ -1480,6 +1481,145 @@ function exportScoutDataCSV() {
     ])
   );
 }
+
+// --- Scout Form Fields ---
+let _formFields = [];
+
+async function loadFormFields() {
+  const el = document.getElementById("form-fields-list");
+  el.innerHTML = '<p class="loading-text">Loading fields...</p>';
+  try {
+    const r = await authFetch(API + "/api/form-fields?include_inactive=true");
+    if (!r.ok) { el.innerHTML = "<p>Failed to load fields.</p>"; return; }
+    _formFields = await r.json();
+    renderFormFields();
+  } catch (err) {
+    el.innerHTML = `<p>Error: ${esc(err.message)}</p>`;
+  }
+}
+
+function renderFormFields() {
+  const el = document.getElementById("form-fields-list");
+  if (!_formFields.length) {
+    el.innerHTML = "<p>No fields configured. Add one above.</p>";
+    return;
+  }
+
+  const typeLabels = {
+    toggle: "Toggle (Yes/No)", checkbox: "Checkbox", text: "Text",
+    number: "Number", textarea: "Text Area", select: "Dropdown",
+  };
+
+  el.innerHTML = `<table>
+    <thead><tr><th style="width:30px;"></th><th>Label</th><th>Key</th><th>Type</th><th>Required</th><th>Options</th><th></th></tr></thead>
+    <tbody>${_formFields.map((f, i) => `<tr draggable="true" data-idx="${i}" data-id="${esc(f.id)}">
+      <td style="cursor:grab;color:var(--sa-pale-gray);">&#x2630;</td>
+      <td><strong>${esc(f.label)}</strong>${!f.active ? ' <span style="color:var(--sa-pale-gray);">(inactive)</span>' : ""}</td>
+      <td style="font-size:12px;color:var(--sa-gray);font-family:monospace;">${esc(f.field_key)}</td>
+      <td>${esc(typeLabels[f.field_type] || f.field_type)}</td>
+      <td>${f.required ? "Yes" : "No"}</td>
+      <td style="font-size:12px;">${f.options ? esc(f.options.join(", ")) : ""}</td>
+      <td>
+        <button class="btn-sm" onclick="toggleFormFieldRequired('${esc(f.id)}', ${!f.required})">${f.required ? "Optional" : "Required"}</button>
+        ${f.active
+          ? `<button class="btn-sm" onclick="toggleFormFieldActive('${esc(f.id)}', false)" style="margin-left:4px;">Disable</button>`
+          : `<button class="btn-sm" onclick="toggleFormFieldActive('${esc(f.id)}', true)" style="margin-left:4px;">Enable</button>`}
+        <button class="btn-sm btn-danger" onclick="deleteFormField('${esc(f.id)}', '${esc(f.label)}')" style="margin-left:4px;">Remove</button>
+      </td>
+    </tr>`).join("")}</tbody>
+  </table>`;
+
+  // Drag-and-drop reorder
+  const tbody = el.querySelector("tbody");
+  let dragRow = null;
+  tbody.querySelectorAll("tr").forEach(row => {
+    row.addEventListener("dragstart", (e) => { dragRow = row; row.style.opacity = ".4"; });
+    row.addEventListener("dragend", () => { row.style.opacity = ""; });
+    row.addEventListener("dragover", (e) => { e.preventDefault(); });
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      if (dragRow && dragRow !== row) {
+        const allRows = [...tbody.querySelectorAll("tr")];
+        const fromIdx = allRows.indexOf(dragRow);
+        const toIdx = allRows.indexOf(row);
+        if (fromIdx < toIdx) row.after(dragRow);
+        else row.before(dragRow);
+        saveFieldOrder();
+      }
+    });
+  });
+}
+
+async function saveFieldOrder() {
+  const rows = document.querySelectorAll("#form-fields-list tbody tr");
+  const ids = [...rows].map(r => r.dataset.id);
+  try {
+    await authFetch(API + "/api/form-fields/reorder/batch", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ field_ids: ids }),
+    });
+  } catch { /* silent */ }
+}
+
+async function toggleFormFieldRequired(id, required) {
+  await authFetch(API + `/api/form-fields/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ required }),
+  });
+  loadFormFields();
+}
+
+async function toggleFormFieldActive(id, active) {
+  await authFetch(API + `/api/form-fields/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ active }),
+  });
+  loadFormFields();
+}
+
+async function deleteFormField(id, label) {
+  if (!confirm(`Remove "${label}"? Previously collected data for this field will be preserved.`)) return;
+  await authFetch(API + `/api/form-fields/${id}`, { method: "DELETE" });
+  loadFormFields();
+}
+
+document.getElementById("form-field-create").onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const label = fd.get("label").trim();
+  const field_type = fd.get("field_type");
+  const required = !!fd.get("required");
+  const optionsRaw = fd.get("options").trim();
+  const options = field_type === "select" && optionsRaw
+    ? optionsRaw.split(",").map(o => o.trim()).filter(Boolean)
+    : null;
+
+  if (!label) return;
+  if (field_type === "select" && (!options || !options.length)) {
+    alert("Dropdown fields require at least one option (comma-separated).");
+    return;
+  }
+
+  try {
+    const r = await authFetch(API + "/api/form-fields", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label, field_type, required, options }),
+    });
+    if (r.ok) {
+      e.target.reset();
+      loadFormFields();
+    } else {
+      const data = await r.json().catch(() => ({}));
+      alert(data.detail || "Failed to create field.");
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+};
 
 // --- Init ---
 _checkAuth().then(() => {

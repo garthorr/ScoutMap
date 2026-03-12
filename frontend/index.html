@@ -41,19 +41,22 @@
   </div>
 
   <nav id="navbar">
-    <h1>ScoutMap</h1>
-    <div class="nav-links">
-      <a href="#" onclick="showPage('dashboard', event)" class="active">Dashboard</a>
-      <a href="#" onclick="showPage('map', event)">Map</a>
-      <a href="#" onclick="showPage('events', event)">Events</a>
-      <a href="#" onclick="showPage('walk-groups', event)">Walk Groups</a>
-      <a href="#" onclick="showPage('imports', event)">Import Data</a>
-      <a href="#" onclick="showPage('houses', event)">Houses</a>
-      <a href="#" onclick="showPage('roster', event)">Roster</a>
-      <a href="#" onclick="showPage('scout-data', event)">Scout Data</a>
-      <a href="#" onclick="showPage('settings', event)">Settings</a>
-      <a href="/scout" target="_blank" style="border:1px solid var(--border);">Scout App</a>
-      <a href="#" onclick="appLogout()" style="color:var(--sa-pale-gray);">Log Out</a>
+    <div class="nav-inner">
+      <h1>ScoutMap</h1>
+      <div class="nav-links">
+        <a href="#" onclick="showPage('dashboard', event)" class="active">Dashboard</a>
+        <a href="#" onclick="showPage('map', event)">Map</a>
+        <a href="#" onclick="showPage('events', event)">Events</a>
+        <a href="#" onclick="showPage('walk-groups', event)">Walk Groups</a>
+        <a href="#" onclick="showPage('imports', event)">Import Data</a>
+        <a href="#" onclick="showPage('houses', event)">Houses</a>
+        <a href="#" onclick="showPage('roster', event)">Roster</a>
+        <a href="#" onclick="showPage('scout-data', event)">Scout Data</a>
+        <a href="#" onclick="showPage('scout-form', event)">Scout Form</a>
+        <a href="#" onclick="showPage('settings', event)">Settings</a>
+        <a href="/scout" target="_blank" style="border:1px solid var(--border);">Scout App</a>
+        <a href="#" onclick="appLogout()" style="color:var(--sa-pale-gray);">Log Out</a>
+      </div>
     </div>
   </nav>
 
@@ -390,6 +393,34 @@ Alex Johnson,,mypass</pre>
       <div class="card">
         <h3>All Visit Records</h3>
         <div id="scout-data-list"></div>
+      </div>
+    </section>
+
+    <!-- Scout Form Config -->
+    <section id="page-scout-form" class="page">
+      <h2>Scout Form Fields</h2>
+      <div class="card card-highlight">
+        <h3>Add Field</h3>
+        <p class="help-text">Configure which fields scouts see when recording a visit. Removing a field keeps all previously collected data intact.</p>
+        <form id="form-field-create" class="inline-form">
+          <input name="label" placeholder="Field label" required style="min-width:180px;" />
+          <select name="field_type" required>
+            <option value="toggle">Toggle (Yes/No)</option>
+            <option value="checkbox">Checkbox</option>
+            <option value="text">Text</option>
+            <option value="number">Number</option>
+            <option value="textarea">Text Area</option>
+            <option value="select">Dropdown</option>
+          </select>
+          <label style="font-size:13px;display:flex;align-items:center;gap:4px;"><input name="required" type="checkbox" /> Required</label>
+          <input name="options" placeholder="Options (comma-separated, for dropdown)" style="min-width:200px;" />
+          <button type="submit">Add Field</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>Active Fields</h3>
+        <p class="help-text">Drag to reorder. Fields appear in this order on the scout app.</p>
+        <div id="form-fields-list"></div>
       </div>
     </section>
 

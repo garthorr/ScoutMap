@@ -170,7 +170,31 @@ class Visit(Base):
     former_scout = Column(Boolean)                           # true = former scout
     avoid_house = Column(Boolean, default=False)             # flag to avoid in future
 
+    # Dynamic form fields (JSON dict keyed by field_key)
+    custom_data = Column(Text)                               # JSON string
+
     event_house = relationship("EventHouse", back_populates="visits")
+
+
+# ---------------------------------------------------------------------------
+# Scout form fields – admin-configurable fields for the scout visit form
+# ---------------------------------------------------------------------------
+class ScoutFormField(Base):
+    __tablename__ = "scout_form_fields"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    field_key = Column(String(100), nullable=False, unique=True)   # slug identifier
+    label = Column(String(200), nullable=False)                     # display label
+    field_type = Column(String(30), nullable=False)                 # toggle, checkbox, text, number, textarea, select
+    required = Column(Boolean, default=False)
+    position = Column(Integer, default=0)                           # sort order
+    options = Column(Text)                                          # JSON array for select fields
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_scout_form_fields_position", "position"),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 import csv
 import io
+import json
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -202,6 +203,7 @@ def list_group_houses(
                 "former_scout": last_visit.former_scout,
                 "avoid_house": last_visit.avoid_house,
                 "notes": last_visit.notes,
+                "custom_data": json.loads(last_visit.custom_data) if last_visit.custom_data else None,
             } if last_visit else None,
         })
     return result
@@ -250,6 +252,7 @@ def scout_data(
             "avoid_house": v.avoid_house,
             "notes": v.notes,
             "outcome": v.outcome,
+            "custom_data": json.loads(v.custom_data) if v.custom_data else None,
         })
     return result
 

@@ -9,13 +9,14 @@ let selectedEventId = "";
 let selectedGroupLabel = "";
 let houses = [];
 let currentHouseIdx = -1;
-let formState = { door: null, donation: null, former: null };
+let formState = {};
 let rosterData = [];
 let eventsData = [];
+let formFields = []; // dynamic field config from server
 
 // --- Auth ---
 let _authToken = localStorage.getItem("scoutmap_token") || "";
-let _loginRoster = []; // roster loaded on login screen (scouts with passwords)
+let _loginRoster = [];
 
 function authFetch(url, opts = {}) {
   opts.headers = opts.headers || {};
@@ -44,7 +45,6 @@ function _hideLoginOverlay() {
   document.querySelector(".container").style.display = "";
 }
 
-// Load scouts with passwords for the login dropdown (public endpoint)
 async function _loadLoginRoster() {
   const sel = document.getElementById("login-scout-select");
   try {
@@ -61,7 +61,6 @@ async function _loadLoginRoster() {
   }
 }
 
-// Toggle between scout and admin login views
 function showAdminLogin() {
   document.getElementById("login-step-scout").style.display = "none";
   document.getElementById("login-step-admin").style.display = "";
@@ -71,7 +70,6 @@ function showScoutLogin() {
   document.getElementById("login-step-admin").style.display = "none";
 }
 
-// Scout password login
 async function scoutPasswordLogin() {
   const scoutId = document.getElementById("login-scout-select").value;
   const password = document.getElementById("login-scout-password").value;
@@ -98,7 +96,7 @@ async function scoutPasswordLogin() {
         name: data.scout_name, id: data.scout_id || "", roster_id: data.roster_id
       }));
       _hideLoginOverlay();
-      loadRoster(); loadEvents();
+      loadRoster(); loadEvents(); loadFormFieldConfig();
     } else {
       errEl.textContent = data.detail || "Invalid credentials."; errEl.style.display = "";
     }
@@ -108,7 +106,6 @@ async function scoutPasswordLogin() {
   btn.disabled = false; btn.textContent = "Sign In";
 }
 
-// Admin password login
 async function scoutAdminLogin() {
   const pw = document.getElementById("login-admin-pw").value;
   const errEl = document.getElementById("login-admin-error");
@@ -127,7 +124,7 @@ async function scoutAdminLogin() {
       _authToken = data.token;
       localStorage.setItem("scoutmap_token", _authToken);
       _hideLoginOverlay();
-      loadRoster(); loadEvents();
+      loadRoster(); loadEvents(); loadFormFieldConfig();
     } else {
       errEl.textContent = data.detail || "Incorrect password."; errEl.style.display = "";
     }
@@ -158,7 +155,6 @@ function restoreScoutInfo() {
       const data = JSON.parse(saved);
       scoutName = data.name || "";
       scoutIdNum = data.id || "";
-      // Selection restored after roster loads
     } catch {}  // eslint-disable-line no-empty
   }
   updateBadge();
@@ -192,7 +188,6 @@ function saveScoutInfo() {
 
 // --- Logout ---
 function scoutLogout() {
-  // Clear auth session
   try { authFetch(API + "/api/auth/logout", { method: "POST" }); } catch { /* ok */ }
   _authToken = "";
   localStorage.removeItem("scoutmap_token");
@@ -231,7 +226,6 @@ async function loadRoster() {
     rosterData.map(s => `<option value="${esc(s.id)}">${esc(s.name)}${s.scout_id ? " (" + esc(s.scout_id) + ")" : ""}</option>`).join("") +
     '<option value="__other__">Other (write in)</option>';
 
-  // Restore previous selection
   const saved = localStorage.getItem("scoutmap_scout");
   if (saved) {
     try {
@@ -249,7 +243,6 @@ async function loadRoster() {
   checkReady();
 }
 
-// Handle scout dropdown change
 document.getElementById("scout-select").onchange = (e) => {
   const wrap = document.getElementById("other-name-wrap");
   if (e.target.value === "__other__") {
@@ -315,6 +308,16 @@ function checkReady() {
   const group = document.getElementById("group-select").value;
   document.getElementById("start-btn").disabled = !(nameOk && group);
   document.getElementById("start-error").style.display = "none";
+}
+
+// --- Load form field config ---
+async function loadFormFieldConfig() {
+  try {
+    const r = await authFetch(API + "/api/form-fields");
+    if (r.ok) formFields = await r.json();
+  } catch {
+    formFields = [];
+  }
 }
 
 // --- Start walking ---
@@ -397,55 +400,106 @@ function renderHouseList() {
   }).join("");
 }
 
+// --- Dynamic form rendering ---
+function renderDynamicForm(lastVisit) {
+  const container = document.getElementById("dynamic-form-fields");
+  formState = {};
+
+  if (!formFields.length) {
+    container.innerHTML = '<p style="color:var(--sa-pale-gray);">No form fields configured.</p>';
+    return;
+  }
+
+  let html = "";
+  for (const f of formFields) {
+    const key = f.field_key;
+    const reqMark = f.required ? ' <span style="color:var(--sa-red);">*</span>' : "";
+
+    // Get previous value from last_visit (check legacy columns first, then custom_data)
+    let prevVal = null;
+    if (lastVisit) {
+      if (key in lastVisit) {
+        prevVal = lastVisit[key];
+      } else if (lastVisit.custom_data && key in lastVisit.custom_data) {
+        prevVal = lastVisit.custom_data[key];
+      }
+    }
+
+    if (f.field_type === "toggle") {
+      formState[key] = prevVal != null ? prevVal : null;
+      html += `<div class="field">
+        <label>${esc(f.label)}${reqMark}</label>
+        <div class="toggle-group" id="toggle-${esc(key)}">
+          <button type="button" class="toggle-btn" data-val="true" onclick="setToggle('${esc(key)}',true)">Yes</button>
+          <button type="button" class="toggle-btn" data-val="false" onclick="setToggle('${esc(key)}',false)">No</button>
+        </div>
+      </div>`;
+    } else if (f.field_type === "checkbox") {
+      const checked = prevVal ? "checked" : "";
+      formState[key] = !!prevVal;
+      html += `<div class="checkbox-field">
+        <input type="checkbox" id="field-${esc(key)}" ${checked} onchange="formState['${esc(key)}']=this.checked" />
+        <label for="field-${esc(key)}">${esc(f.label)}${reqMark}</label>
+      </div>`;
+    } else if (f.field_type === "number") {
+      formState[key] = prevVal || null;
+      html += `<div class="field">
+        <label for="field-${esc(key)}">${esc(f.label)}${reqMark}</label>
+        <input id="field-${esc(key)}" type="number" step="any" min="0" placeholder="${esc(f.label)}" value="${prevVal != null ? esc(prevVal) : ""}" oninput="formState['${esc(key)}']=this.value?parseFloat(this.value):null" />
+      </div>`;
+    } else if (f.field_type === "text") {
+      formState[key] = prevVal || "";
+      html += `<div class="field">
+        <label for="field-${esc(key)}">${esc(f.label)}${reqMark}</label>
+        <input id="field-${esc(key)}" type="text" placeholder="${esc(f.label)}" value="${esc(prevVal || "")}" oninput="formState['${esc(key)}']=this.value" />
+      </div>`;
+    } else if (f.field_type === "textarea") {
+      formState[key] = prevVal || "";
+      html += `<div class="field">
+        <label for="field-${esc(key)}">${esc(f.label)}${reqMark}</label>
+        <textarea id="field-${esc(key)}" placeholder="${esc(f.label)}" oninput="formState['${esc(key)}']=this.value">${esc(prevVal || "")}</textarea>
+      </div>`;
+    } else if (f.field_type === "select") {
+      formState[key] = prevVal || "";
+      const opts = f.options || [];
+      html += `<div class="field">
+        <label for="field-${esc(key)}">${esc(f.label)}${reqMark}</label>
+        <select id="field-${esc(key)}" onchange="formState['${esc(key)}']=this.value">
+          <option value="">—</option>
+          ${opts.map(o => `<option value="${esc(o)}" ${prevVal === o ? "selected" : ""}>${esc(o)}</option>`).join("")}
+        </select>
+      </div>`;
+    }
+  }
+
+  container.innerHTML = html;
+
+  // Highlight toggle buttons for pre-filled values
+  for (const f of formFields) {
+    if (f.field_type === "toggle" && formState[f.field_key] != null) {
+      highlightToggle(f.field_key, formState[f.field_key]);
+    }
+  }
+}
+
 // --- Open house form ---
 function openHouseForm(idx) {
   currentHouseIdx = idx;
   const h = houses[idx];
   document.getElementById("form-house-addr").textContent = h.address;
-
-  formState = { door: null, donation: null, former: null };
-  document.getElementById("donation-amount").value = "";
-  document.getElementById("avoid-house").checked = false;
-  document.getElementById("visit-notes").value = "";
-  document.getElementById("donation-amount-wrap").classList.remove("visible");
-
-  if (h.last_visit) {
-    if (h.last_visit.door_answer != null) setToggle("door", h.last_visit.door_answer);
-    if (h.last_visit.donation_given != null) setToggle("donation", h.last_visit.donation_given);
-    if (h.last_visit.former_scout != null) setToggle("former", h.last_visit.former_scout);
-    if (h.last_visit.donation_amount) document.getElementById("donation-amount").value = h.last_visit.donation_amount;
-    if (h.last_visit.avoid_house) document.getElementById("avoid-house").checked = true;
-    if (h.last_visit.notes) document.getElementById("visit-notes").value = h.last_visit.notes;
-  }
-
-  resetToggleUI();
+  renderDynamicForm(h.last_visit);
   showScreen("house-form-screen");
-}
-
-function resetToggleUI() {
-  ["door", "donation", "former"].forEach(key => {
-    const group = document.getElementById("toggle-" + key);
-    group.querySelectorAll(".toggle-btn").forEach(btn => {
-      btn.classList.remove("active-yes", "active-no");
-    });
-    if (formState[key] != null) {
-      highlightToggle(key, formState[key]);
-    }
-  });
 }
 
 // --- Toggle buttons ---
 function setToggle(key, val) {
   formState[key] = val;
   highlightToggle(key, val);
-  if (key === "donation") {
-    document.getElementById("donation-amount-wrap").classList.toggle("visible", val === true);
-    if (!val) document.getElementById("donation-amount").value = "";
-  }
 }
 
 function highlightToggle(key, val) {
   const group = document.getElementById("toggle-" + key);
+  if (!group) return;
   group.querySelectorAll(".toggle-btn").forEach(btn => {
     btn.classList.remove("active-yes", "active-no");
     const btnVal = btn.dataset.val === "true";
@@ -461,22 +515,44 @@ function cancelForm() {
 
 // --- Save visit ---
 async function saveVisit() {
+  // Validate required fields
+  for (const f of formFields) {
+    if (f.required) {
+      const val = formState[f.field_key];
+      if (val == null || val === "" || val === false) {
+        alert(`"${f.label}" is required.`);
+        return;
+      }
+    }
+  }
+
   const h = houses[currentHouseIdx];
   const btn = document.getElementById("save-visit-btn");
   btn.disabled = true;
   btn.textContent = "Saving...";
 
+  // Map known legacy columns from formState
+  const legacyKeys = ["door_answer", "donation_given", "donation_amount", "former_scout", "avoid_house", "notes"];
   const body = {
-    outcome: formState.door === false ? "not_home" : (formState.donation ? "donated" : "other"),
-    door_answer: formState.door,
-    donation_given: formState.donation,
-    donation_amount: formState.donation ? (parseFloat(document.getElementById("donation-amount").value) || null) : null,
-    former_scout: formState.former,
-    avoid_house: document.getElementById("avoid-house").checked,
-    notes: document.getElementById("visit-notes").value.trim() || null,
     scout_name: scoutName,
     scout_id: scoutIdNum || null,
+    custom_data: {},
   };
+
+  // Populate legacy columns and custom_data
+  for (const f of formFields) {
+    const val = formState[f.field_key];
+    if (legacyKeys.includes(f.field_key)) {
+      body[f.field_key] = val;
+    }
+    // Always store in custom_data for consistency
+    body.custom_data[f.field_key] = val;
+  }
+
+  // Derive outcome from known fields
+  if (body.door_answer === false) body.outcome = "not_home";
+  else if (body.donation_given) body.outcome = "donated";
+  else body.outcome = "other";
 
   try {
     const r = await authFetch(API + `/api/events/${h.event_id}/houses/${h.event_house_id}/visits`, {
@@ -487,14 +563,8 @@ async function saveVisit() {
     if (r.ok) {
       h.visited = true;
       h.status = "visited";
-      h.last_visit = {
-        door_answer: body.door_answer,
-        donation_given: body.donation_given,
-        donation_amount: body.donation_amount,
-        former_scout: body.former_scout,
-        avoid_house: body.avoid_house,
-        notes: body.notes,
-      };
+      // Reconstruct last_visit from formState for display
+      h.last_visit = { ...body, custom_data: body.custom_data };
       renderHouseList();
       showScreen("house-list-screen");
     } else {
@@ -514,5 +584,6 @@ _checkAuth().then(() => {
     restoreScoutInfo();
     loadRoster();
     loadEvents();
+    loadFormFieldConfig();
   }
 });

@@ -40,15 +40,19 @@ body {
 #navbar {
   background: var(--sa-white);
   color: var(--sa-dark-gray);
-  display: flex;
-  align-items: center;
-  padding: 0 24px;
-  height: 56px;
-  gap: 24px;
   box-shadow: 0 1px 0 var(--border);
   position: sticky;
   top: 0;
   z-index: 500;
+}
+.nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 32px;
+  height: 56px;
+  gap: 24px;
 }
 #navbar h1 {
   font-size: 17px;
@@ -518,7 +522,7 @@ details[open] summary {
 
 /* --- Responsive --- */
 @media (max-width: 768px) {
-  #navbar { padding: 0 12px; height: 48px; gap: 12px; }
+  .nav-inner { padding: 0 12px; height: 48px; gap: 12px; }
   #navbar h1 { font-size: 15px; }
   .nav-links a { padding: 6px 8px; font-size: 12px; }
   main { margin: 12px; padding: 16px; border-radius: var(--radius); }
