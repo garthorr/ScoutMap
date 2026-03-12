@@ -925,8 +925,10 @@ function clearBoxSelection() {
   _updateBoxSelectedUI();
   if (_boxSelectRect && map) { map.removeLayer(_boxSelectRect); _boxSelectRect = null; }
   _boxSelectStart = null;
-  // Remove event listener
-  if (map) map.getContainer().removeEventListener("mousedown", _boxMouseDown);
+  // Only remove the listener if we're leaving select mode
+  if (_mapTool !== "select" && map) {
+    map.getContainer().removeEventListener("mousedown", _boxMouseDown);
+  }
 }
 
 async function boxDeleteSelected() {
