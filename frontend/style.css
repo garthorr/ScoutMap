@@ -242,6 +242,9 @@ tr:hover { background: #f5f5f0; }
 .btn-sm.btn-danger:hover {
   background: #a80d1e;
 }
+.map-tool { background: var(--sa-light-tan); color: var(--sa-dark-gray); border: 2px solid #c5c5c5; }
+.map-tool:hover { background: #d6cebd; }
+.map-tool.active { border-color: var(--sa-blue); background: var(--sa-blue); color: var(--sa-white); }
 
 /* --- Details / collapsible groups --- */
 details {
