@@ -266,86 +266,34 @@ function showPage(name, evt) {
 }
 
 // --- Dashboard ---
-const TILE_PAGE_MAP = {
-  Houses: "houses",
-  Events: "events",
-  Visits: "scout-data",
-  Donations: "scout-data",
-  Unmatched: "imports",
-  Imports: "imports",
-  Scouts: "roster",
-};
-
-function _savedTileOrder() {
-  try { return JSON.parse(localStorage.getItem("tile_order")); } catch { return null; }
+function _phaseStat(label, value, page) {
+  return `<div class="phase-stat" onclick="showPage('${page}')">
+    <span class="phase-stat-label">${label}</span>
+    <span class="phase-stat-value">${value}</span>
+  </div>`;
 }
 
 async function loadDashboard() {
   const r = await authFetch(API + "/api/stats/");
   const s = await r.json();
-  const tiles = [
-    { key: "Houses",    value: s.total_houses },
-    { key: "Events",    value: s.total_events },
-    { key: "Visits",    value: s.total_visits },
-    { key: "Donations", value: "$" + (s.total_donations || 0).toLocaleString() },
-    { key: "Scouts",    value: s.total_scouts ?? 0 },
-    { key: "Unmatched", value: s.unmatched_count },
-    { key: "Imports",   value: s.import_count },
-  ];
 
-  // Apply saved order
-  const order = _savedTileOrder();
-  if (order) {
-    tiles.sort((a, b) => {
-      const ai = order.indexOf(a.key), bi = order.indexOf(b.key);
-      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-    });
-  }
+  // Phase 1: Prepare Data
+  document.getElementById("phase-prepare-stats").innerHTML =
+    _phaseStat("Events", s.total_events, "events") +
+    _phaseStat("Imports", s.import_count, "imports") +
+    _phaseStat("Unmatched", s.unmatched_count, "imports") +
+    _phaseStat("Scouts", s.total_scouts ?? 0, "roster");
 
-  const grid = document.getElementById("stats-grid");
-  grid.innerHTML = tiles.map(t => stat(t.key, t.value)).join("");
-  _initTileDrag(grid);
-}
+  // Phase 2: Organize
+  document.getElementById("phase-organize-stats").innerHTML =
+    _phaseStat("Houses", s.total_houses, "houses") +
+    _phaseStat("Assigned", s.assigned_houses ?? 0, "events") +
+    _phaseStat("Visited", s.houses_visited ?? 0, "scout-data");
 
-function stat(label, value) {
-  const page = TILE_PAGE_MAP[label] || "dashboard";
-  return `<div class="stat-card" draggable="true" data-tile="${label}" onclick="showPage('${page}')" style="cursor:pointer;">`
-    + `<div class="value">${value}</div><div class="label">${label}</div></div>`;
-}
-
-function _initTileDrag(grid) {
-  let dragged = null;
-  grid.querySelectorAll(".stat-card").forEach(card => {
-    card.addEventListener("dragstart", (e) => {
-      dragged = card;
-      card.style.opacity = "0.4";
-      e.dataTransfer.effectAllowed = "move";
-    });
-    card.addEventListener("dragend", () => {
-      card.style.opacity = "";
-      dragged = null;
-      grid.querySelectorAll(".stat-card").forEach(c => c.classList.remove("drag-over"));
-    });
-    card.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      card.classList.add("drag-over");
-    });
-    card.addEventListener("dragleave", () => card.classList.remove("drag-over"));
-    card.addEventListener("drop", (e) => {
-      e.preventDefault();
-      card.classList.remove("drag-over");
-      if (!dragged || dragged === card) return;
-      const cards = [...grid.querySelectorAll(".stat-card")];
-      const fromIdx = cards.indexOf(dragged);
-      const toIdx = cards.indexOf(card);
-      if (fromIdx < toIdx) card.after(dragged);
-      else card.before(dragged);
-      // Save order
-      const order = [...grid.querySelectorAll(".stat-card")].map(c => c.dataset.tile);
-      localStorage.setItem("tile_order", JSON.stringify(order));
-    });
-  });
+  // Phase 3: Collect
+  document.getElementById("phase-collect-stats").innerHTML =
+    _phaseStat("Visits", s.total_visits, "scout-data") +
+    _phaseStat("Donations", "$" + (s.total_donations || 0).toLocaleString(), "scout-data");
 }
 
 // --- Map ---

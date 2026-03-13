@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.database import get_db
-from app.models import MasterHouse, FundraiserEvent, Visit, UnmatchedRecord, SourceImport, ScoutRoster
+from app.models import MasterHouse, FundraiserEvent, EventHouse, Visit, UnmatchedRecord, SourceImport, ScoutRoster
 from app.schemas import DashboardStats
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
@@ -24,5 +24,9 @@ def dashboard(db: Session = Depends(get_db)):
         import_count=db.query(func.count(SourceImport.id)).scalar() or 0,
         total_scouts=db.query(func.count(ScoutRoster.id)).filter(
             ScoutRoster.active == True
+        ).scalar() or 0,
+        assigned_houses=db.query(func.count(EventHouse.id)).scalar() or 0,
+        houses_visited=db.query(func.count(func.distinct(EventHouse.id))).join(
+            Visit, Visit.event_house_id == EventHouse.id
         ).scalar() or 0,
     )
