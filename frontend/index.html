@@ -45,14 +45,21 @@
       <h1>ScoutMap</h1>
       <div class="nav-links">
         <a href="#" onclick="showPage('dashboard', event)" class="active">Dashboard</a>
-        <a href="#" onclick="showPage('map', event)">Map</a>
+        <span class="nav-divider"></span>
+        <span class="nav-phase-label">Prepare</span>
         <a href="#" onclick="showPage('events', event)">Events</a>
-        <a href="#" onclick="showPage('walk-groups', event)">Walk Groups</a>
         <a href="#" onclick="showPage('imports', event)">Import Data</a>
+        <a href="#" onclick="showPage('roster', event)">Scouts</a>
+        <span class="nav-divider"></span>
+        <span class="nav-phase-label">Organize</span>
+        <a href="#" onclick="showPage('map', event)">Map</a>
         <a href="#" onclick="showPage('houses', event)">Houses</a>
-        <a href="#" onclick="showPage('roster', event)">Roster</a>
+        <a href="#" onclick="showPage('walk-groups', event)">Walk Groups</a>
+        <span class="nav-divider"></span>
+        <span class="nav-phase-label">Collect</span>
         <a href="#" onclick="showPage('scout-data', event)">Scout Data</a>
         <a href="#" onclick="showPage('scout-form', event)">Scout Form</a>
+        <span class="nav-divider"></span>
         <a href="#" onclick="showPage('settings', event)">Settings</a>
         <a href="/scout" target="_blank" style="border:1px solid var(--border);">Scout App</a>
         <a href="#" onclick="appLogout()" style="color:var(--sa-pale-gray);">Log Out</a>
@@ -64,7 +71,51 @@
     <!-- Dashboard -->
     <section id="page-dashboard" class="page active">
       <h2>Dashboard</h2>
-      <div id="stats-grid" class="stats-grid"></div>
+
+      <div class="phase-row">
+        <div class="phase-block" data-phase="prepare">
+          <div class="phase-header">
+            <span class="phase-number">1</span>
+            <span class="phase-title">Prepare Data</span>
+          </div>
+          <div class="phase-stats" id="phase-prepare-stats"></div>
+          <div class="phase-links">
+            <a href="#" onclick="showPage('events', event)">Events</a>
+            <a href="#" onclick="showPage('imports', event)">Import Data</a>
+            <a href="#" onclick="showPage('roster', event)">Scouts</a>
+          </div>
+        </div>
+
+        <div class="phase-arrow">&#8594;</div>
+
+        <div class="phase-block" data-phase="organize">
+          <div class="phase-header">
+            <span class="phase-number">2</span>
+            <span class="phase-title">Organize</span>
+          </div>
+          <div class="phase-stats" id="phase-organize-stats"></div>
+          <div class="phase-links">
+            <a href="#" onclick="showPage('map', event)">Map</a>
+            <a href="#" onclick="showPage('houses', event)">Houses</a>
+            <a href="#" onclick="showPage('walk-groups', event)">Walk Groups</a>
+          </div>
+        </div>
+
+        <div class="phase-arrow">&#8594;</div>
+
+        <div class="phase-block" data-phase="collect">
+          <div class="phase-header">
+            <span class="phase-number">3</span>
+            <span class="phase-title">Collect</span>
+          </div>
+          <div class="phase-stats" id="phase-collect-stats"></div>
+          <div class="phase-links">
+            <a href="#" onclick="showPage('scout-data', event)">Scout Data</a>
+            <a href="#" onclick="showPage('scout-form', event)">Scout Form</a>
+            <a href="/scout" target="_blank">Scout App</a>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Map -->

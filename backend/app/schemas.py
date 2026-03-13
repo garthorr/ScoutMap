@@ -180,3 +180,5 @@ class DashboardStats(BaseModel):
     unmatched_count: int
     import_count: int
     total_scouts: int = 0
+    assigned_houses: int = 0
+    houses_visited: int = 0
