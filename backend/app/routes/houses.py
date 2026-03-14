@@ -88,6 +88,24 @@ def list_streets(
     ]
 
 
+@router.get("/zip-codes")
+def list_zip_codes(db: Session = Depends(get_db)):
+    """Return all distinct ZIP codes that have houses with coordinates."""
+    rows = (
+        db.query(MasterHouse.zip_code, func.count(MasterHouse.id))
+        .filter(
+            MasterHouse.zip_code.isnot(None),
+            MasterHouse.zip_code != "",
+            MasterHouse.latitude.isnot(None),
+            MasterHouse.longitude.isnot(None),
+        )
+        .group_by(MasterHouse.zip_code)
+        .order_by(MasterHouse.zip_code)
+        .all()
+    )
+    return [{"zip_code": z, "count": c} for z, c in rows]
+
+
 @router.get("/{house_id}", response_model=MasterHouseOut)
 def get_house(house_id: str, db: Session = Depends(get_db)):
     house = db.query(MasterHouse).filter(MasterHouse.id == house_id).first()
