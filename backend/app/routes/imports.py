@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.database import get_db
-from app.models import SourceImport, UnmatchedRecord, HouseSourceLink, MasterHouse, EventHouse
+from app.models import SourceImport, UnmatchedRecord, HouseSourceLink, MasterHouse, EventHouse, FundraiserEvent
 from app.schemas import SourceImportOut, UnmatchedRecordOut
 from app.routes.auth import require_admin
 from app.importers import get_importer
@@ -31,12 +31,20 @@ async def create_import(
     source_name: str = Form(...),
     file: UploadFile = File(...),
     notes: str = Form(None),
+    event_id: str = Form(None),
     _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     importer = get_importer(source_name)
     if not importer:
         raise HTTPException(400, f"Unknown source: {source_name}. Available: dallas_gis, dcad")
+
+    # Validate event_id if provided
+    event = None
+    if event_id:
+        event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
+        if not event:
+            raise HTTPException(400, f"Event not found: {event_id}")
 
     batch_id = str(uuid.uuid4())
     si = SourceImport(
@@ -65,6 +73,43 @@ async def create_import(
         si.notes = (si.notes or "") + f"\nError: {str(e)}"
         db.commit()
         raise HTTPException(500, f"Import failed: {e}")
+
+    # Auto-assign imported houses to event if event_id was provided
+    assigned = 0
+    if event:
+        imported_house_ids = [
+            row[0] for row in
+            db.query(HouseSourceLink.house_id)
+            .filter(HouseSourceLink.source_import_id == str(si.id))
+            .all()
+        ]
+        # Only assign houses that have coordinates (needed for map/walk groups)
+        houses_with_coords = set(
+            row[0] for row in
+            db.query(MasterHouse.id)
+            .filter(
+                MasterHouse.id.in_(imported_house_ids),
+                MasterHouse.latitude.isnot(None),
+                MasterHouse.longitude.isnot(None),
+            )
+            .all()
+        ) if imported_house_ids else set()
+        # Skip houses already assigned to this event
+        already_assigned = set(
+            row[0] for row in
+            db.query(EventHouse.house_id)
+            .filter(
+                EventHouse.event_id == event.id,
+                EventHouse.house_id.in_(list(houses_with_coords)),
+            )
+            .all()
+        ) if houses_with_coords else set()
+        for house_id in houses_with_coords:
+            if house_id not in already_assigned:
+                db.add(EventHouse(event_id=event.id, house_id=house_id))
+                assigned += 1
+        if assigned:
+            si.notes = (si.notes or "") + f"\nAuto-assigned {assigned} houses to event: {event.name}"
 
     db.commit()
     return si

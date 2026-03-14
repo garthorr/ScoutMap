@@ -330,6 +330,12 @@
             <input name="notes" placeholder="Notes (optional)" />
             <span class="tooltip">Optional label to identify this import batch</span>
           </span>
+          <span class="tooltip-wrap">
+            <select name="event_id" id="import-event-select">
+              <option value="">No event (import only)</option>
+            </select>
+            <span class="tooltip">Optionally assign all imported houses to an event so you can create walk groups immediately</span>
+          </span>
           <button type="submit">Import</button>
         </form>
         <div id="import-progress" class="hidden">
