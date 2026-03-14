@@ -256,7 +256,7 @@ function showPage(name, evt) {
   if (name === "dashboard") loadDashboard();
   if (name === "map") initMap();
   if (name === "events") loadEvents();
-  if (name === "imports") { loadImports(); loadUnmatched(); }
+  if (name === "imports") { loadImports(); loadUnmatched(); loadImportEventSelect(); }
   if (name === "houses") loadHouses();
   if (name === "walk-groups") loadWalkGroupEvents();
   if (name === "roster") loadRoster();
@@ -1535,6 +1535,18 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
 };
 
 // --- Imports ---
+async function loadImportEventSelect() {
+  const sel = document.getElementById("import-event-select");
+  if (!sel) return;
+  try {
+    const r = await authFetch(API + "/api/events/");
+    if (!r.ok) return;
+    const events = await r.json();
+    sel.innerHTML = '<option value="">No event (import only)</option>' +
+      events.map(ev => `<option value="${esc(ev.id)}">${esc(ev.name)}</option>`).join("");
+  } catch (_) { /* keep default option */ }
+}
+
 document.getElementById("import-form").onsubmit = async (e) => {
   e.preventDefault();
   if (!confirm("This will import addresses and add/update houses in the database.\n\nExisting house data will not be overwritten.\n\nContinue?")) return;
@@ -1545,8 +1557,12 @@ document.getElementById("import-form").onsubmit = async (e) => {
     const r = await authFetch(API + "/api/imports/", { method: "POST", body: fd });
     const data = await r.json();
     if (r.ok) {
-      document.getElementById("import-status").textContent =
-        `Done! ${data.record_count} records imported.`;
+      let msg = `Done! ${data.record_count} records imported.`;
+      if (data.notes && data.notes.includes("Auto-assigned")) {
+        const match = data.notes.match(/Auto-assigned (\d+) houses to event: (.+)/);
+        if (match) msg += ` ${match[1]} houses assigned to "${match[2]}" — you can now create walk groups.`;
+      }
+      document.getElementById("import-status").textContent = msg;
     } else {
       document.getElementById("import-status").textContent = `Error: ${data.detail || "unknown"}`;
     }
