@@ -256,7 +256,7 @@ function showPage(name, evt) {
   if (name === "dashboard") loadDashboard();
   if (name === "map") initMap();
   if (name === "events") loadEvents();
-  if (name === "imports") { loadImports(); loadUnmatched(); loadImportEventSelect(); }
+  if (name === "imports") { loadImports(); loadUnmatched(); loadImportEventSelect(); loadArcGISEventSelect(); }
   if (name === "houses") loadHouses();
   if (name === "walk-groups") loadWalkGroupEvents();
   if (name === "roster") loadRoster();
@@ -331,6 +331,7 @@ function initMap() {
     map.on("click", _handleMapToolClick);
     refreshMapDots();
     _loadMapEventSelect();
+    _loadMapZipSelect();
   }, 100);
 }
 
@@ -600,16 +601,47 @@ function _computeMidline(sortedHouses) {
   return mid;
 }
 
+// --- ZIP code multi-select for map ---
+async function _loadMapZipSelect() {
+  const sel = document.getElementById("map-zip-select");
+  if (!sel) return;
+  try {
+    const r = await authFetch(API + "/api/houses/zip-codes");
+    if (!r.ok) return;
+    const zips = await r.json();
+    sel.innerHTML = zips.map(z =>
+      `<option value="${esc(z.zip_code)}">${esc(z.zip_code)} (${z.count} houses)</option>`
+    ).join("");
+  } catch { sel.innerHTML = '<option value="">Error loading ZIPs</option>'; }
+}
+
 // --- Street selection ---
 async function loadMapStreets() {
-  const zip = document.getElementById("map-zip").value.trim();
-  if (!zip) { alert("Enter a ZIP code."); return; }
+  const sel = document.getElementById("map-zip-select");
+  const selectedZips = Array.from(sel.selectedOptions).map(o => o.value).filter(Boolean);
+  if (!selectedZips.length) { alert("Select at least one ZIP code."); return; }
 
   document.getElementById("map-street-count").textContent = "Loading…";
   try {
-    const r = await authFetch(API + `/api/houses/streets?zip_code=${zip}`);
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    _mapStreets = await r.json();
+    // Fetch streets for all selected ZIPs and merge
+    const allStreets = [];
+    for (const zip of selectedZips) {
+      const r = await authFetch(API + `/api/houses/streets?zip_code=${zip}`);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const streets = await r.json();
+      allStreets.push(...streets);
+    }
+    // Merge streets with same name across ZIPs
+    const merged = {};
+    for (const s of allStreets) {
+      if (merged[s.street]) {
+        merged[s.street].count += s.count;
+        merged[s.street].houses.push(...s.houses);
+      } else {
+        merged[s.street] = { ...s, houses: [...s.houses] };
+      }
+    }
+    _mapStreets = Object.values(merged).sort((a, b) => a.street.localeCompare(b.street));
   } catch (err) {
     document.getElementById("map-street-count").textContent = "Error: " + err.message;
     return;
@@ -731,8 +763,9 @@ function copySelectedStreets() {
   const assignStreetInput = document.querySelector('#assign-form [name="street_names"]');
   const assignZipInput = document.querySelector('#assign-form [name="zip_codes"]');
   if (assignStreetInput) assignStreetInput.value = streetStr;
-  if (assignZipInput && document.getElementById("map-zip").value) {
-    assignZipInput.value = document.getElementById("map-zip").value;
+  const selZips = Array.from(document.getElementById("map-zip-select").selectedOptions).map(o => o.value).filter(Boolean);
+  if (assignZipInput && selZips.length) {
+    assignZipInput.value = selZips.join(", ");
   }
   showPage("events");
   alert(`${_selectedStreets.size} street(s) copied to the assign form. Open an event to assign them.`);
@@ -1079,7 +1112,7 @@ function _placeAddMarker(latlng) {
         <input id="add-house-address" placeholder="Full address" style="width:100%;padding:4px 6px;font-size:13px;border:1px solid #c5c5c5;border-radius:4px;" />
       </div>
       <div style="margin-bottom:4px;">
-        <input id="add-house-zip" placeholder="ZIP code" style="width:80px;padding:4px 6px;font-size:13px;border:1px solid #c5c5c5;border-radius:4px;" value="${document.getElementById("map-zip").value || ""}" />
+        <input id="add-house-zip" placeholder="ZIP code" style="width:80px;padding:4px 6px;font-size:13px;border:1px solid #c5c5c5;border-radius:4px;" value="${(Array.from(document.getElementById("map-zip-select").selectedOptions).map(o => o.value)[0]) || ""}" />
       </div>
       <div style="font-size:11px;color:#888;margin-bottom:6px;">
         ${latlng.lat.toFixed(6)}, ${latlng.lng.toFixed(6)}
@@ -1500,6 +1533,45 @@ document.getElementById("visit-form").onsubmit = async (e) => {
 function printPacket() { window.print(); }
 
 // --- ArcGIS Fetch ---
+let _arcgisCountTimer = null;
+document.getElementById("arcgis-zip-input").addEventListener("input", () => {
+  clearTimeout(_arcgisCountTimer);
+  _arcgisCountTimer = setTimeout(checkArcGISCount, 600);
+});
+
+async function checkArcGISCount() {
+  const el = document.getElementById("arcgis-record-count");
+  const zips = document.getElementById("arcgis-zip-input").value.trim();
+  if (!zips) { el.textContent = ""; return; }
+  const zip_codes = zips.split(",").map(s => s.trim()).filter(Boolean);
+  if (!zip_codes.length) { el.textContent = ""; return; }
+  el.textContent = "checking…";
+  try {
+    const r = await authFetch(API + "/api/arcgis/count", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ zip_codes }),
+    });
+    const data = await r.json();
+    if (data.count !== null && data.count !== undefined) {
+      el.textContent = `${data.count.toLocaleString()} records available`;
+    } else {
+      el.textContent = data.error || "count unavailable";
+    }
+  } catch { el.textContent = ""; }
+}
+
+async function loadArcGISEventSelect() {
+  const sel = document.getElementById("arcgis-event-select");
+  if (!sel) return;
+  try {
+    const r = await authFetch(API + "/api/events/");
+    if (!r.ok) return;
+    const events = await r.json();
+    sel.innerHTML = '<option value="">No event (import only)</option>' +
+      events.map(ev => `<option value="${esc(ev.id)}">${esc(ev.name)}</option>`).join("");
+  } catch (_) { /* keep default */ }
+}
+
 document.getElementById("arcgis-form").onsubmit = async (e) => {
   e.preventDefault();
   if (!confirm("This will fetch public data and add/update houses in the database.\n\nExisting house data will not be overwritten, only missing fields will be filled in.\n\nContinue?")) return;
@@ -1510,6 +1582,8 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
     notes: fd.get("notes") || undefined,
   };
   if (zips) body.zip_codes = zips.split(",").map(s => s.trim()).filter(Boolean);
+  const eventId = fd.get("event_id");
+  if (eventId) body.event_id = eventId;
   document.getElementById("arcgis-progress").classList.remove("hidden");
   document.getElementById("arcgis-status").textContent = "connecting…";
   try {
@@ -1520,8 +1594,9 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
     });
     const data = await r.json();
     if (r.ok) {
-      document.getElementById("arcgis-status").textContent =
-        `Done! Fetched ${data.fetched} parcels, imported ${data.imported} records.`;
+      let msg = `Done! Fetched ${data.fetched} parcels, imported ${data.imported} records.`;
+      if (data.assigned) msg += ` ${data.assigned} houses assigned to "${data.event_name}" — ready for walk groups.`;
+      document.getElementById("arcgis-status").textContent = msg;
     } else {
       document.getElementById("arcgis-status").textContent =
         `Error: ${data.detail || "unknown"}`;
@@ -1529,6 +1604,7 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
   } catch (err) {
     document.getElementById("arcgis-status").textContent = "Network error: " + err.message;
   }
+  document.getElementById("arcgis-record-count").textContent = "";
   e.target.reset();
   loadImports();
   loadUnmatched();

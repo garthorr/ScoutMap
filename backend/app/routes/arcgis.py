@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import get_db
-from app.models import MasterHouse, HouseSourceLink, SourceImport, UnmatchedRecord
+from app.models import MasterHouse, HouseSourceLink, SourceImport, UnmatchedRecord, EventHouse, FundraiserEvent
 from app.address import normalize_address, parse_address_parts
 from app.routes.auth import require_admin
 
@@ -56,6 +56,7 @@ class ArcGISFetchRequest(BaseModel):
     bbox_ymax: Optional[float] = None
     max_records: int = 2000
     notes: Optional[str] = None
+    event_id: Optional[str] = None
 
 
 def _build_where(req: ArcGISFetchRequest) -> str:
@@ -236,9 +237,40 @@ async def test_arcgis_connection():
         return {"error": str(exc), "type": type(exc).__name__}
 
 
+class ArcGISCountRequest(BaseModel):
+    zip_codes: Optional[list[str]] = None
+
+
+@router.post("/count")
+async def count_arcgis_parcels(req: ArcGISCountRequest, _admin: str = Depends(require_admin)):
+    """Query ArcGIS to get the record count for given ZIP codes without fetching data."""
+    where_req = ArcGISFetchRequest(zip_codes=req.zip_codes)
+    where = _build_where(where_req)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(ARCGIS_QUERY, params={
+                "where": where,
+                "returnCountOnly": "true",
+                "f": "json",
+            })
+            data = resp.json()
+            if "error" in data:
+                return {"count": None, "error": data["error"].get("message", str(data["error"]))}
+            return {"count": data.get("count", 0)}
+    except Exception as exc:
+        return {"count": None, "error": str(exc)}
+
+
 @router.post("/fetch")
 async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Fetch tax parcels from Dallas ArcGIS and import into the database."""
+    # Validate event_id if provided
+    event = None
+    if req.event_id:
+        event = db.query(FundraiserEvent).filter(FundraiserEvent.id == req.event_id).first()
+        if not event:
+            raise HTTPException(400, f"Event not found: {req.event_id}")
+
     where = _build_where(req)
     bbox = None
     if all(v is not None for v in [req.bbox_xmin, req.bbox_ymin, req.bbox_xmax, req.bbox_ymax]):
@@ -346,11 +378,38 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
     si.record_count = imported
     si.status = "completed"
     si.completed_at = datetime.utcnow()
+
+    # Auto-assign imported houses to event if event_id was provided
+    assigned = 0
+    if event:
+        imported_house_ids = [
+            row[0] for row in
+            db.query(HouseSourceLink.house_id)
+            .filter(HouseSourceLink.source_import_id == str(si.id))
+            .all()
+        ]
+        if imported_house_ids:
+            already_assigned = set(
+                row[0] for row in
+                db.query(EventHouse.house_id)
+                .filter(
+                    EventHouse.event_id == event.id,
+                    EventHouse.house_id.in_(imported_house_ids),
+                )
+                .all()
+            )
+            for house_id in imported_house_ids:
+                if house_id not in already_assigned:
+                    db.add(EventHouse(event_id=event.id, house_id=house_id))
+                    assigned += 1
+
     db.commit()
 
     return {
         "status": "ok",
         "fetched": len(features),
         "imported": imported,
+        "assigned": assigned,
+        "event_name": event.name if event else None,
         "import_id": str(si.id),
     }

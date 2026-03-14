@@ -124,8 +124,9 @@
       <div class="card" style="margin-bottom:12px;">
         <div class="inline-form" style="gap:10px;">
           <span class="tooltip-wrap">
-            <input id="map-zip" placeholder="ZIP code" style="width:100px;" />
-            <span class="tooltip">Load streets for this ZIP code</span>
+            <select id="map-zip-select" multiple style="min-width:180px;height:34px;">
+            </select>
+            <span class="tooltip">Select one or more imported ZIP codes to load on the map</span>
           </span>
           <button onclick="loadMapStreets()">Load Streets</button>
           <span class="tooltip-wrap">
@@ -273,9 +274,10 @@
         <p class="help-text">Pull tax parcel data directly from the City of Dallas ArcGIS REST service — no file download needed. Includes addresses, owner names, parcel IDs, and appraised values with coordinates.</p>
         <form id="arcgis-form" class="inline-form">
           <span class="tooltip-wrap">
-            <input name="zip_codes" placeholder="ZIP codes (comma-separated)" />
+            <input name="zip_codes" id="arcgis-zip-input" placeholder="ZIP codes (comma-separated)" />
             <span class="tooltip">Filter parcels by ZIP, e.g. 75201, 75214</span>
           </span>
+          <span id="arcgis-record-count" style="font-size:13px;color:var(--sa-gray);min-width:80px;"></span>
           <span class="tooltip-wrap">
             <input name="max_records" type="number" value="2000" min="1" max="10000" />
             <span class="tooltip">Max parcels to fetch (up to 10,000)</span>
@@ -283,6 +285,12 @@
           <span class="tooltip-wrap">
             <input name="notes" placeholder="Notes (optional)" />
             <span class="tooltip">Optional label for this fetch batch</span>
+          </span>
+          <span class="tooltip-wrap">
+            <select name="event_id" id="arcgis-event-select">
+              <option value="">No event (import only)</option>
+            </select>
+            <span class="tooltip">Optionally assign fetched parcels to an event for walk groups</span>
           </span>
           <button type="submit" title="Fetch parcels from Dallas ArcGIS">Fetch Parcels</button>
         </form>
