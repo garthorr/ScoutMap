@@ -200,10 +200,7 @@ async def _fetch_all_pages(
             data = resp.json()
             if "error" in data:
                 logger.error("ArcGIS error: %s", json.dumps(data["error"]))
-                msg = data["error"].get("message", str(data["error"]))
-                details = data["error"].get("details", [])
-                full_msg = f"{msg}. Details: {details}" if details else msg
-                raise HTTPException(502, f"ArcGIS error: {full_msg}")
+                raise HTTPException(502, "Failed to fetch data from ArcGIS service. Check server logs for details.")
 
             features = data.get("features", [])
             logger.info("ArcGIS returned %d features (offset=%d)", len(features), offset)

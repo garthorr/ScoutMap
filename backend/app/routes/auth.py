@@ -407,8 +407,8 @@ def set_scout_password(
     scout = db.query(ScoutRoster).filter(ScoutRoster.id == roster_id).first()
     if not scout:
         raise HTTPException(404, "Scout not found")
-    if len(body.password) < 4:
-        raise HTTPException(400, "Password must be at least 4 characters")
+    if len(body.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
     scout.password_hash = _hash_password(body.password)
     # Invalidate existing sessions for this scout
     db.query(AuthSession).filter(AuthSession.email == f"scout:{roster_id}").delete()

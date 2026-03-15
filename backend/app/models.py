@@ -142,6 +142,8 @@ class EventHouse(Base):
 
     __table_args__ = (
         UniqueConstraint("event_id", "house_id", name="uq_event_house"),
+        Index("ix_event_houses_status", "status"),
+        Index("ix_event_houses_assigned_to", "assigned_to"),
     )
 
 
@@ -174,6 +176,11 @@ class Visit(Base):
     custom_data = Column(Text)                               # JSON string
 
     event_house = relationship("EventHouse", back_populates="visits")
+
+    __table_args__ = (
+        Index("ix_visits_visited_at", "visited_at"),
+        Index("ix_visits_scout_name", "scout_name"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +255,10 @@ class AuthCode(Base):
     expires_at = Column(DateTime, nullable=False)
     used = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_auth_codes_email_used", "email", "used"),
+    )
 
 
 class AuthSession(Base):
