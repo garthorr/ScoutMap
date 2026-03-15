@@ -24,6 +24,35 @@ function authFetch(url, opts = {}) {
   return fetch(url, opts);
 }
 
+// --- Loading indicators ---
+function _showMapLoading(msg) {
+  const el = document.getElementById("map-loading");
+  const txt = document.getElementById("map-loading-text");
+  if (el) { txt.textContent = msg || "Loading houses…"; el.classList.add("visible"); }
+}
+function _hideMapLoading() {
+  const el = document.getElementById("map-loading");
+  if (el) el.classList.remove("visible");
+}
+let _opStatusTimer = null;
+function _showStatus(msg) {
+  const el = document.getElementById("operation-status");
+  const txt = document.getElementById("operation-status-text");
+  if (!el) return;
+  clearTimeout(_opStatusTimer);
+  txt.textContent = msg;
+  el.classList.add("visible");
+}
+function _hideStatus() {
+  const el = document.getElementById("operation-status");
+  if (el) el.classList.remove("visible");
+  clearTimeout(_opStatusTimer);
+}
+function _flashStatus(msg, duration) {
+  _showStatus(msg);
+  _opStatusTimer = setTimeout(_hideStatus, duration || 2500);
+}
+
 async function _checkAuth() {
   if (!_authToken) { _showLogin(); return; }
   try {
@@ -358,8 +387,10 @@ async function refreshMapDots() {
     limit,
   });
 
+  _showMapLoading(useFullDetail ? "Loading house details…" : "Loading map…");
   houseDotLayer.clearLayers();
 
+  try {
   if (useFullDetail) {
     // Full data with popups for close zoom
     const r = await authFetch(API + "/api/houses/map?" + params);
@@ -388,6 +419,9 @@ async function refreshMapDots() {
       dot._houseId = d.id;
       houseDotLayer.addLayer(dot);
     });
+  }
+  } finally {
+    _hideMapLoading();
   }
 }
 
@@ -1011,6 +1045,7 @@ async function boxDeleteSelected() {
   const ids = _boxSelectedHouses.map(h => h.id).filter(Boolean);
   if (!ids.length) { alert("No house IDs found. Zoom in closer and try again."); return; }
 
+  _showStatus(`Deleting ${ids.length} house(s)…`);
   try {
     const r = await authFetch(API + "/api/houses/batch-delete", {
       method: "POST",
@@ -1019,12 +1054,15 @@ async function boxDeleteSelected() {
     });
     if (r.ok) {
       clearBoxSelection();
+      _flashStatus(`Deleted ${ids.length} house(s).`);
       refreshMapDots();
     } else {
+      _hideStatus();
       const data = await r.json().catch(() => ({}));
       alert(data.detail || "Error deleting houses.");
     }
   } catch (err) {
+    _hideStatus();
     alert("Error: " + err.message);
   }
 }
@@ -1050,6 +1088,7 @@ async function boxAssignSelected() {
 
   const groupLabel = prompt("Group label (optional):", "");
 
+  _showStatus(`Assigning ${ids.length} house(s)…`);
   try {
     const body = {
       house_ids: ids,
@@ -1062,13 +1101,15 @@ async function boxAssignSelected() {
     });
     if (ar.ok) {
       const data = await ar.json();
-      alert(`Assigned ${data.assigned || ids.length} house(s) to "${ev.name}".`);
+      _flashStatus(`Assigned ${data.assigned || ids.length} house(s) to "${ev.name}".`);
       clearBoxSelection();
     } else {
+      _hideStatus();
       const data = await ar.json().catch(() => ({}));
       alert(data.detail || "Error assigning houses.");
     }
   } catch (err) {
+    _hideStatus();
     alert("Error: " + err.message);
   }
 }
@@ -1205,6 +1246,7 @@ async function boundaryImportFromArcGIS() {
   if (!confirm(msg)) return;
 
   document.getElementById("map-boundary-arcgis-count").textContent = "(importing…)";
+  _showStatus("Importing parcels from ArcGIS…");
   try {
     const body = {
       polygon: _boundaryPoints,
@@ -1222,7 +1264,7 @@ async function boundaryImportFromArcGIS() {
       let result = `Fetched ${data.fetched} parcels, imported ${data.imported} records.`;
       if (data.assigned) result += ` ${data.assigned} assigned to "${data.event_name}".`;
       document.getElementById("map-boundary-arcgis-count").textContent = `(${data.imported} imported)`;
-      alert(result);
+      _flashStatus(`Imported ${data.imported} parcels from ArcGIS.`);
       refreshMapDots();
       // Re-count local houses in boundary
       try {
@@ -1235,10 +1277,12 @@ async function boundaryImportFromArcGIS() {
         if (cr.ok) document.getElementById("map-boundary-count").textContent = (cd.count || 0).toLocaleString();
       } catch {}
     } else {
+      _hideStatus();
       alert("Error: " + (data.detail || JSON.stringify(data)));
       document.getElementById("map-boundary-arcgis-count").textContent = arcgisCountText;
     }
   } catch (err) {
+    _hideStatus();
     alert("Network error: " + err.message);
     document.getElementById("map-boundary-arcgis-count").textContent = arcgisCountText;
   }
@@ -1365,6 +1409,7 @@ function cancelAddHouse() {
 
 // --- Events ---
 async function loadEvents() {
+  document.getElementById("events-list").innerHTML = '<div class="loading-bar"></div>';
   const r = await authFetch(API + "/api/events/");
   const events = await r.json();
   document.getElementById("events-list").innerHTML = events.length
@@ -1386,9 +1431,11 @@ async function loadEvents() {
 
 async function deleteEvent(id, name) {
   if (!confirm(`Delete event "${name}"? This will remove all assigned houses and visit records for this event.`)) return;
+  _showStatus("Deleting event…");
   try {
     const r = await authFetch(API + `/api/events/${id}`, { method: "DELETE" });
     if (r.ok) {
+      _flashStatus(`Deleted event "${name}".`);
       loadEvents();
       // If we were viewing this event's detail, go back
       if (currentEventId === id) {
@@ -1397,10 +1444,12 @@ async function deleteEvent(id, name) {
         showPage("events");
       }
     } else {
+      _hideStatus();
       const data = await r.json().catch(() => ({}));
       alert(data.detail || "Failed to delete event.");
     }
   } catch (err) {
+    _hideStatus();
     alert("Error: " + err.message);
   }
 }
@@ -1525,6 +1574,7 @@ function _renderGroupedHouses(houses, { openByDefault = false } = {}) {
 
 let _eventHousesCache = [];
 async function loadEventHouses() {
+  document.getElementById("event-houses-list").innerHTML = '<div class="loading-bar"></div>';
   const r = await authFetch(API + `/api/events/${currentEventId}/houses`);
   const houses = await r.json();
   _eventHousesCache = houses;
@@ -1793,6 +1843,7 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
   if (eventId) body.event_id = eventId;
   document.getElementById("arcgis-progress").classList.remove("hidden");
   document.getElementById("arcgis-status").textContent = "connecting…";
+  _showStatus("Fetching parcels from ArcGIS…");
   try {
     const r = await authFetch(API + "/api/arcgis/fetch", {
       method: "POST",
@@ -1804,6 +1855,7 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
       let msg = `Done! Fetched ${data.fetched} parcels, imported ${data.imported} records.`;
       if (data.assigned) msg += ` ${data.assigned} houses assigned to "${data.event_name}" — ready for walk groups.`;
       document.getElementById("arcgis-status").textContent = msg;
+      _flashStatus(`Imported ${data.imported} records from ArcGIS.`);
     } else {
       document.getElementById("arcgis-status").textContent =
         `Error: ${data.detail || "unknown"}`;
@@ -1836,6 +1888,7 @@ document.getElementById("import-form").onsubmit = async (e) => {
   const fd = new FormData(e.target);
   document.getElementById("import-progress").classList.remove("hidden");
   document.getElementById("import-status").textContent = "uploading…";
+  _showStatus("Importing file…");
   try {
     const r = await authFetch(API + "/api/imports/", { method: "POST", body: fd });
     const data = await r.json();
@@ -1846,6 +1899,7 @@ document.getElementById("import-form").onsubmit = async (e) => {
         if (match) msg += ` ${match[1]} houses assigned to "${match[2]}" — you can now create walk groups.`;
       }
       document.getElementById("import-status").textContent = msg;
+      _flashStatus(`Imported ${data.record_count} records.`);
     } else {
       document.getElementById("import-status").textContent = `Error: ${data.detail || "unknown"}`;
     }
@@ -1866,6 +1920,7 @@ function importTitle(i) {
 }
 
 async function loadImports() {
+  document.getElementById("imports-list").innerHTML = '<div class="loading-bar"></div>';
   const r = await authFetch(API + "/api/imports/");
   const imports = await r.json();
   document.getElementById("imports-list").innerHTML = imports.length
@@ -1882,13 +1937,15 @@ async function loadImports() {
 
 async function deleteImport(id) {
   if (!confirm("Delete this import and its records?")) return;
+  _showStatus("Deleting import…");
   const r = await authFetch(API + "/api/imports/" + id, { method: "DELETE" });
   const data = await r.json();
   if (r.ok) {
-    alert(`Deleted. ${data.houses_removed} house(s) removed, ${data.houses_kept} kept.`);
+    _flashStatus(`Deleted. ${data.houses_removed} house(s) removed, ${data.houses_kept} kept.`);
     loadImports();
     loadUnmatched();
   } else {
+    _hideStatus();
     alert("Delete failed: " + (data.detail || JSON.stringify(data)));
   }
 }
@@ -1908,6 +1965,7 @@ async function loadUnmatched() {
 
 // --- Houses ---
 async function loadHouses() {
+  document.getElementById("houses-list").innerHTML = '<div class="loading-bar"></div>';
   const search = document.getElementById("house-search")?.value || "";
   const zip = document.getElementById("house-zip")?.value || "";
   const params = new URLSearchParams();
@@ -1965,6 +2023,7 @@ document.getElementById("manual-house-form").onsubmit = async (e) => {
 
 // --- Roster ---
 async function loadRoster() {
+  document.getElementById("roster-list").innerHTML = '<div class="loading-bar"></div>';
   const r = await authFetch(API + "/api/scout/roster");
   const roster = await r.json();
   document.getElementById("roster-list").innerHTML = roster.length
@@ -2072,6 +2131,8 @@ async function loadScoutDataEvents() {
 
 let _scoutDataCache = [];
 async function loadScoutData() {
+  document.getElementById("scout-summary").innerHTML = '<div class="loading-bar"></div>';
+  document.getElementById("scout-data-list").innerHTML = '<div class="loading-bar"></div>';
   const eventId = document.getElementById("sd-event-filter").value;
   const params = eventId ? "?event_id=" + eventId : "";
 
