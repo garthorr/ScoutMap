@@ -533,6 +533,97 @@ details[open] summary {
   font-size: 13px;
 }
 
+/* --- Map loading overlay --- */
+#map-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255,255,255,.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 450;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+#map-loading.visible {
+  opacity: 1;
+}
+#map-loading .loading-pill {
+  background: var(--sa-white);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sa-dark-blue);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--sa-dark-blue);
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* --- Inline loading bar (for tables/lists) --- */
+.loading-bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.loading-bar::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 30%;
+  background: var(--sa-dark-blue);
+  border-radius: 2px;
+  animation: loading-slide 1s ease-in-out infinite;
+}
+@keyframes loading-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+/* --- Operation status toast --- */
+#operation-status {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: var(--sa-dark-blue);
+  color: var(--sa-white);
+  padding: 10px 24px;
+  border-radius: 24px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-lg);
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: transform .3s ease;
+  pointer-events: none;
+}
+#operation-status.visible {
+  transform: translateX(-50%) translateY(0);
+}
+
 /* --- Footer --- */
 #app-footer {
   text-align: center;
