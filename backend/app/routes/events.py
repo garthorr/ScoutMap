@@ -139,20 +139,26 @@ def assign_houses(event_id: str, body: EventAssignRequest, _admin: str = Depends
     if not event:
         raise HTTPException(404, "Event not found")
 
-    q = db.query(MasterHouse).filter(
-        MasterHouse.latitude.isnot(None),
-        MasterHouse.longitude.isnot(None),
-    )
-    if body.zip_codes:
-        q = q.filter(MasterHouse.zip_code.in_(body.zip_codes))
-    if body.street_names:
-        patterns = [MasterHouse.normalized_address.ilike(f"%{s.strip().upper()}%") for s in body.street_names]
-        q = q.filter(or_(*patterns))
-    if body.limit:
-        q = q.limit(body.limit)
+    if body.house_ids:
+        # Direct assignment by house IDs (from map selection)
+        house_ids_str = body.house_ids
+        houses = db.query(MasterHouse).filter(MasterHouse.id.in_(house_ids_str)).all()
+        house_ids = [h.id for h in houses]
+    else:
+        q = db.query(MasterHouse).filter(
+            MasterHouse.latitude.isnot(None),
+            MasterHouse.longitude.isnot(None),
+        )
+        if body.zip_codes:
+            q = q.filter(MasterHouse.zip_code.in_(body.zip_codes))
+        if body.street_names:
+            patterns = [MasterHouse.normalized_address.ilike(f"%{s.strip().upper()}%") for s in body.street_names]
+            q = q.filter(or_(*patterns))
+        if body.limit:
+            q = q.limit(body.limit)
 
-    houses = q.all()
-    house_ids = [h.id for h in houses]
+        houses = q.all()
+        house_ids = [h.id for h in houses]
 
     # Batch-fetch existing assignments
     existing_ids = set()

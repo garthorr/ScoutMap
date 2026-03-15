@@ -29,7 +29,8 @@
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  background: var(--bg-page);
+  background: linear-gradient(135deg, var(--sa-light-tan) 0%, var(--sa-tan) 100%);
+  background-attachment: fixed;
   color: var(--sa-dark-gray);
   min-height: 100vh;
   line-height: 1.5;
@@ -38,9 +39,10 @@ body {
 
 /* --- Navbar --- */
 #navbar {
-  background: var(--sa-white);
-  color: var(--sa-dark-gray);
-  box-shadow: 0 1px 0 var(--border);
+  background: linear-gradient(180deg, var(--sa-dark-blue) 0%, #002a5c 100%);
+  color: var(--sa-white);
+  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  border-bottom: 3px solid var(--sa-red);
   position: sticky;
   top: 0;
   z-index: 500;
@@ -51,14 +53,14 @@ body {
   display: flex;
   align-items: center;
   padding: 0 32px;
-  height: 56px;
+  height: 64px;
   gap: 24px;
 }
 #navbar h1 {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   white-space: nowrap;
-  color: var(--sa-dark-blue);
+  color: var(--sa-white);
   letter-spacing: -.2px;
 }
 .nav-links {
@@ -70,21 +72,23 @@ body {
 }
 .nav-links::-webkit-scrollbar { display: none; }
 .nav-links a {
-  color: var(--sa-gray);
+  color: rgba(255,255,255,.7);
   text-decoration: none;
   padding: 8px 12px;
   border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .3px;
   transition: background var(--transition), color var(--transition);
   white-space: nowrap;
 }
 .nav-links a:hover {
-  background: var(--bg-subtle);
-  color: var(--sa-dark-gray);
+  background: rgba(255,255,255,.1);
+  color: var(--sa-white);
 }
 .nav-links a.active {
-  background: var(--sa-dark-blue);
+  background: var(--sa-red);
   color: var(--sa-white);
 }
 
@@ -109,7 +113,7 @@ h2 {
   color: var(--sa-dark-gray);
   font-weight: 700;
   padding-bottom: 12px;
-  border-bottom: 2px solid var(--border);
+  border-bottom: 2px solid var(--sa-red);
   letter-spacing: -.3px;
 }
 h3 {
@@ -121,15 +125,17 @@ h3 {
 
 /* --- Cards --- */
 .card {
-  background: var(--sa-white);
+  background: #fafbfc;
   border-radius: var(--radius);
   padding: 20px;
   margin-bottom: 16px;
   border: 1px solid var(--border);
+  border-top: 3px solid var(--sa-blue);
 }
 .card-highlight {
   background: var(--bg-subtle);
-  border-left: 3px solid var(--sa-blue);
+  border-left: 3px solid var(--sa-red);
+  border-top: 3px solid var(--sa-blue);
 }
 .help-text {
   font-size: 13px;
@@ -144,7 +150,7 @@ h3 {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .6px;
-  color: var(--sa-pale-gray);
+  color: rgba(255,255,255,.4);
   padding: 6px 4px 6px 8px;
   white-space: nowrap;
   align-self: center;
@@ -152,7 +158,7 @@ h3 {
 .nav-divider {
   width: 1px;
   height: 24px;
-  background: var(--border);
+  background: rgba(255,255,255,.15);
   align-self: center;
   margin: 0 4px;
   flex-shrink: 0;
@@ -274,11 +280,12 @@ h3 {
   padding: 20px 16px;
   text-align: center;
   border: 1px solid var(--border);
+  border-top: 3px solid var(--sa-red);
   transition: box-shadow var(--transition), transform var(--transition);
 }
 .stat-card:hover {
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
 }
 .stat-card.drag-over {
   outline: 2px dashed var(--sa-blue);
@@ -289,8 +296,8 @@ h3 {
   touch-action: none;
 }
 .stat-card .value {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 32px;
+  font-weight: 800;
   color: var(--sa-dark-blue);
   letter-spacing: -.5px;
 }
@@ -325,7 +332,7 @@ h3 {
 }
 .inline-form button, button {
   padding: 8px 16px;
-  background: var(--sa-dark-blue);
+  background: var(--sa-red);
   color: var(--sa-white);
   border: none;
   border-radius: 6px;
@@ -335,7 +342,7 @@ h3 {
   transition: background var(--transition), box-shadow var(--transition);
 }
 button:hover {
-  background: #002a5c;
+  background: #a80d1e;
   box-shadow: var(--shadow-sm);
 }
 
@@ -343,8 +350,8 @@ button:hover {
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 12px 12px; border-bottom: 1px solid var(--border); }
 th {
-  background: var(--bg-subtle);
-  color: var(--sa-gray);
+  background: var(--sa-dark-blue);
+  color: var(--sa-white);
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
@@ -550,7 +557,7 @@ details[open] summary {
 #login-overlay {
   position: fixed;
   inset: 0;
-  background: var(--bg-page);
+  background: linear-gradient(135deg, var(--sa-light-tan) 0%, var(--sa-tan) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
