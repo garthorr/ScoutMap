@@ -355,7 +355,7 @@ async function refreshMapDots() {
   houses.forEach(h => {
     if (!h.latitude || !h.longitude) return;
     const dot = L.circleMarker([h.latitude, h.longitude], {
-      radius: 4, fillColor: "#003F87", color: "#003F87",
+      radius: 5, fillColor: "#003F87", color: "#003F87",
       weight: 1, opacity: 0.8, fillOpacity: 0.6,
     });
     dot.bindPopup(`<b>${esc(h.full_address)}</b><br>${esc(h.owner_name)}<br>` +
@@ -844,13 +844,24 @@ function setMapTool(tool) {
 function _initBoxSelect() {
   const container = map.getContainer();
   container.addEventListener("mousedown", _boxMouseDown);
+  container.addEventListener("touchstart", _boxTouchStart, { passive: false });
+}
+
+function _getContainerPoint(e) {
+  const rect = map.getContainer().getBoundingClientRect();
+  if (e.touches && e.touches.length) {
+    return L.point(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+  }
+  if (e.changedTouches && e.changedTouches.length) {
+    return L.point(e.changedTouches[0].clientX - rect.left, e.changedTouches[0].clientY - rect.top);
+  }
+  return L.point(e.clientX - rect.left, e.clientY - rect.top);
 }
 
 function _boxMouseDown(e) {
   if (_mapTool !== "select") return;
-  // Only left click
   if (e.button !== 0) return;
-  const latlng = map.containerPointToLatLng(L.point(e.clientX - map.getContainer().getBoundingClientRect().left, e.clientY - map.getContainer().getBoundingClientRect().top));
+  const latlng = map.containerPointToLatLng(_getContainerPoint(e));
   _boxSelectStart = latlng;
   if (_boxSelectRect) { map.removeLayer(_boxSelectRect); _boxSelectRect = null; }
 
@@ -858,10 +869,33 @@ function _boxMouseDown(e) {
   document.addEventListener("mouseup", _boxMouseUp);
 }
 
+function _boxTouchStart(e) {
+  if (_mapTool !== "select") return;
+  if (e.touches.length !== 1) return;
+  e.preventDefault();
+  const latlng = map.containerPointToLatLng(_getContainerPoint(e));
+  _boxSelectStart = latlng;
+  if (_boxSelectRect) { map.removeLayer(_boxSelectRect); _boxSelectRect = null; }
+
+  document.addEventListener("touchmove", _boxTouchMove, { passive: false });
+  document.addEventListener("touchend", _boxTouchEnd);
+}
+
 function _boxMouseMove(e) {
   if (!_boxSelectStart || _mapTool !== "select") return;
-  const rect = map.getContainer().getBoundingClientRect();
-  const latlng = map.containerPointToLatLng(L.point(e.clientX - rect.left, e.clientY - rect.top));
+  const latlng = map.containerPointToLatLng(_getContainerPoint(e));
+  const bounds = L.latLngBounds(_boxSelectStart, latlng);
+  if (_boxSelectRect) {
+    _boxSelectRect.setBounds(bounds);
+  } else {
+    _boxSelectRect = L.rectangle(bounds, { color: "#003F87", weight: 2, fillOpacity: 0.15, dashArray: "6 3" }).addTo(map);
+  }
+}
+
+function _boxTouchMove(e) {
+  if (!_boxSelectStart || _mapTool !== "select") return;
+  e.preventDefault();
+  const latlng = map.containerPointToLatLng(_getContainerPoint(e));
   const bounds = L.latLngBounds(_boxSelectStart, latlng);
   if (_boxSelectRect) {
     _boxSelectRect.setBounds(bounds);
@@ -875,8 +909,7 @@ function _boxMouseUp(e) {
   document.removeEventListener("mouseup", _boxMouseUp);
   if (!_boxSelectStart || _mapTool !== "select") return;
 
-  const rect = map.getContainer().getBoundingClientRect();
-  const latlng = map.containerPointToLatLng(L.point(e.clientX - rect.left, e.clientY - rect.top));
+  const latlng = map.containerPointToLatLng(_getContainerPoint(e));
   const bounds = L.latLngBounds(_boxSelectStart, latlng);
   _boxSelectStart = null;
 
@@ -908,6 +941,37 @@ function _boxMouseUp(e) {
   _updateBoxSelectedUI();
 }
 
+function _boxTouchEnd(e) {
+  document.removeEventListener("touchmove", _boxTouchMove);
+  document.removeEventListener("touchend", _boxTouchEnd);
+  if (!_boxSelectStart || _mapTool !== "select") return;
+
+  const latlng = map.containerPointToLatLng(_getContainerPoint(e));
+  const bounds = L.latLngBounds(_boxSelectStart, latlng);
+  _boxSelectStart = null;
+
+  if (_boxSelectRect) { map.removeLayer(_boxSelectRect); _boxSelectRect = null; }
+
+  const size = map.latLngToContainerPoint(bounds.getNorthEast()).subtract(map.latLngToContainerPoint(bounds.getSouthWest()));
+  if (Math.abs(size.x) < 10 && Math.abs(size.y) < 10) return;
+
+  _clearBoxHighlights();
+  _boxSelectedHouses = [];
+  houseDotLayer.eachLayer(layer => {
+    if (layer.getLatLng && bounds.contains(layer.getLatLng())) {
+      const ll = layer.getLatLng();
+      const popup = layer.getPopup();
+      const content = popup ? popup.getContent() : "";
+      const addrMatch = content.match(/<b>(.*?)<\/b>/);
+      const address = addrMatch ? addrMatch[1].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"') : "";
+      _boxSelectedHouses.push({ lat: ll.lat, lng: ll.lng, address, _layer: layer });
+      const hl = L.circleMarker(ll, { radius: 8, fillColor: "#f59e0b", color: "#fff", weight: 2, fillOpacity: 0.8 }).addTo(map);
+      _boxHighlights.push(hl);
+    }
+  });
+  _updateBoxSelectedUI();
+}
+
 function _clearBoxHighlights() {
   _boxHighlights.forEach(m => map.removeLayer(m));
   _boxHighlights = [];
@@ -933,6 +997,7 @@ function clearBoxSelection() {
   // Only remove the listener if we're leaving select mode
   if (_mapTool !== "select" && map) {
     map.getContainer().removeEventListener("mousedown", _boxMouseDown);
+    map.getContainer().removeEventListener("touchstart", _boxTouchStart);
   }
 }
 
@@ -1063,9 +1128,9 @@ function _setupEraseOnDot(dot, houseId, address) {
       const xMarker = L.marker(dot.getLatLng(), {
         icon: L.divIcon({
           className: "",
-          html: '<div style="color:#CE1126;font-size:22px;font-weight:900;text-align:center;line-height:22px;text-shadow:0 0 3px #fff,0 0 3px #fff;">✕</div>',
-          iconSize: [22, 22],
-          iconAnchor: [11, 11],
+          html: '<div style="color:#CE1126;font-size:26px;font-weight:900;text-align:center;line-height:30px;text-shadow:0 0 3px #fff,0 0 3px #fff;">✕</div>',
+          iconSize: [30, 30],
+          iconAnchor: [15, 15],
         }),
         interactive: false,
       });
@@ -1129,14 +1194,14 @@ function _addBoundaryPoint(latlng) {
     const dist = map.latLngToContainerPoint(latlng).distanceTo(
       map.latLngToContainerPoint(L.latLng(first[0], first[1]))
     );
-    if (dist < 15) { closeBoundary(); return; }
+    if (dist < 25) { closeBoundary(); return; }
   }
 
   _boundaryPoints.push(pt);
 
-  // Add vertex marker
+  // Add vertex marker (larger for touch usability)
   const marker = L.circleMarker(latlng, {
-    radius: 6, color: "#003F87", fillColor: "#fff", fillOpacity: 1, weight: 2,
+    radius: 8, color: "#003F87", fillColor: "#fff", fillOpacity: 1, weight: 2,
   }).addTo(map);
   _boundaryMarkers.push(marker);
 

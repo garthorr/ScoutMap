@@ -222,13 +222,14 @@ h3 {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
   font-size: 13px;
   cursor: pointer;
+  min-height: 44px;
 }
 .phase-stat:last-child { border-bottom: none; }
-.phase-stat:hover { color: var(--sa-dark-blue); }
+.phase-stat:hover, .phase-stat:active { color: var(--sa-dark-blue); }
 .phase-stat .phase-stat-label { color: var(--sa-gray); }
 .phase-stat .phase-stat-value {
   font-weight: 700;
@@ -243,16 +244,19 @@ h3 {
   border-top: 1px solid var(--border);
 }
 .phase-links a {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--sa-blue);
   text-decoration: none;
-  padding: 4px 10px;
+  padding: 8px 14px;
   border: 1px solid var(--sa-blue);
   border-radius: 4px;
   transition: background var(--transition), color var(--transition);
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
 }
-.phase-links a:hover {
+.phase-links a:hover, .phase-links a:active {
   background: var(--sa-blue);
   color: var(--sa-white);
 }
@@ -337,7 +341,7 @@ button:hover {
 
 /* --- Tables --- */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+th, td { text-align: left; padding: 12px 12px; border-bottom: 1px solid var(--border); }
 th {
   background: var(--bg-subtle);
   color: var(--sa-gray);
@@ -364,10 +368,11 @@ tr:hover { background: var(--bg-subtle); }
 
 /* --- Buttons --- */
 .btn-sm {
-  padding: 5px 10px;
-  font-size: 12px;
+  padding: 7px 12px;
+  font-size: 13px;
   background: var(--sa-dark-blue);
   font-weight: 500;
+  min-height: 36px;
 }
 .btn-sm:hover { background: #002a5c; box-shadow: none; }
 .btn-sm.btn-danger {
@@ -381,8 +386,10 @@ tr:hover { background: var(--bg-subtle); }
   background: var(--sa-white);
   color: var(--sa-dark-gray);
   border: 1px solid var(--border);
+  min-height: 38px;
+  min-width: 38px;
 }
-.map-tool:hover { background: var(--bg-subtle); }
+.map-tool:hover, .map-tool:active { background: var(--bg-subtle); }
 .map-tool.active {
   border-color: var(--sa-dark-blue);
   background: var(--sa-dark-blue);
@@ -421,11 +428,13 @@ details[open] summary {
   box-shadow: var(--shadow-lg);
 }
 .modal-content .close {
-  position: absolute; top: 12px; right: 16px;
-  font-size: 22px; cursor: pointer; color: var(--sa-pale-gray);
-  background: none; border: none; padding: 0;
+  position: absolute; top: 8px; right: 8px;
+  font-size: 24px; cursor: pointer; color: var(--sa-pale-gray);
+  background: none; border: none; padding: 8px;
+  min-width: 44px; min-height: 44px;
+  display: flex; align-items: center; justify-content: center;
 }
-.modal-content .close:hover { color: var(--sa-red); background: none; }
+.modal-content .close:hover, .modal-content .close:active { color: var(--sa-red); background: none; }
 .modal-content label {
   display: block;
   margin-bottom: 10px;
@@ -480,7 +489,8 @@ details[open] summary {
   border: 5px solid transparent;
   border-top-color: var(--sa-dark-gray);
 }
-.tooltip-wrap:hover .tooltip {
+.tooltip-wrap:hover .tooltip,
+.tooltip-wrap:focus-within .tooltip {
   visibility: visible;
   opacity: 1;
 }
@@ -527,9 +537,11 @@ details[open] summary {
   letter-spacing: .3px;
 }
 
-/* --- Map street list --- */
-#map-streets label:hover { background: var(--bg-subtle); border-radius: 3px; }
-#map-streets input[type="checkbox"] { margin-right: 4px; vertical-align: middle; }
+/* --- Map --- */
+#map { touch-action: manipulation; }
+#map-streets label { min-height: 36px; display: flex; align-items: center; padding: 2px 4px; }
+#map-streets label:hover, #map-streets label:active { background: var(--bg-subtle); border-radius: 3px; }
+#map-streets input[type="checkbox"] { margin-right: 6px; vertical-align: middle; width: 18px; height: 18px; }
 .leaflet-control-layers { font-size: 13px; }
 
 .hidden { display: none !important; }
@@ -643,7 +655,7 @@ details[open] summary {
 @media (max-width: 768px) {
   .nav-inner { padding: 0 12px; height: 48px; gap: 12px; }
   #navbar h1 { font-size: 15px; }
-  .nav-links a { padding: 6px 8px; font-size: 12px; }
+  .nav-links a { padding: 8px 10px; font-size: 13px; min-height: 40px; display: inline-flex; align-items: center; }
   main { margin: 12px; padding: 16px; border-radius: var(--radius); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .phase-row { flex-direction: column; gap: 12px; }
@@ -651,5 +663,22 @@ details[open] summary {
   .nav-phase-label { display: none; }
   .nav-divider { display: none; }
   .inline-form { flex-direction: column; align-items: stretch; }
-  .inline-form input, .inline-form select { width: 100%; }
+  .inline-form input, .inline-form select { width: 100%; min-height: 44px; font-size: 16px; }
+  .inline-form button, button { min-height: 44px; font-size: 14px; }
+  .btn-sm { min-height: 38px; padding: 8px 14px; font-size: 13px; }
+  #map-toolbar { gap: 4px !important; }
+  #map-toolbar .map-tool { font-size: 12px; padding: 6px 8px; min-height: 36px; }
+  th, td { padding: 12px 8px; }
+  details summary { padding: 12px 0; min-height: 44px; display: flex; align-items: center; }
+}
+
+/* Touch-capable devices: ensure minimum tap targets */
+@media (pointer: coarse) {
+  .nav-links a { min-height: 44px; display: inline-flex; align-items: center; padding: 8px 12px; }
+  .btn-sm { min-height: 38px; }
+  .map-tool { min-height: 40px; min-width: 40px; }
+  .phase-stat { min-height: 48px; }
+  .phase-links a { min-height: 44px; }
+  details summary { min-height: 44px; display: flex; align-items: center; }
+  .modal-content .close { min-width: 48px; min-height: 48px; }
 }
