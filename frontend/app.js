@@ -370,9 +370,10 @@ async function refreshMapDots() {
         radius: dotRadius, fillColor: "#003F87", color: "#003F87",
         weight: 1, opacity: 0.8, fillOpacity: 0.6,
       });
+      dot._houseId = h.id;
+      dot._address = h.full_address;
       dot.bindPopup(`<b>${esc(h.full_address)}</b><br>${esc(h.owner_name || "")}<br>` +
         (h.total_appraised_value ? `Appraised: $${h.total_appraised_value.toLocaleString()}` : ""));
-      _setupEraseOnDot(dot, h.id, h.full_address);
       houseDotLayer.addLayer(dot);
     });
   } else {
@@ -384,6 +385,7 @@ async function refreshMapDots() {
         radius: dotRadius, fillColor: "#003F87", color: "#003F87",
         weight: 0.5, opacity: 0.6, fillOpacity: 0.4,
       });
+      dot._houseId = d.id;
       houseDotLayer.addLayer(dot);
     });
   }
@@ -802,8 +804,7 @@ function copySelectedStreets() {
 }
 
 // --- Map tools: erase, add, box-select ---
-let _mapTool = "pointer";       // "pointer" | "erase" | "add" | "select" | "boundary"
-let _eraseMarked = new Map();   // house_id -> L.marker (X markers for pending deletes)
+let _mapTool = "pointer";       // "pointer" | "add" | "select" | "boundary"
 let _addMarker = null;          // temp marker for add mode
 
 // Box-select state
@@ -823,7 +824,6 @@ let _boundaryHouseIds = [];     // house IDs found inside
 
 function setMapTool(tool) {
   // Clean up previous tool state
-  if (_mapTool === "erase" && tool !== "erase") cancelErase();
   if (_mapTool === "add" && tool !== "add" && _addMarker) {
     map.removeLayer(_addMarker); _addMarker = null;
   }
@@ -836,16 +836,12 @@ function setMapTool(tool) {
 
   const hint = document.getElementById("map-tool-hint");
   const mapEl = document.getElementById("map");
-  if (tool === "erase") {
-    hint.textContent = "Click house dots to mark them for removal.";
-    mapEl.style.cursor = "crosshair";
-    map.dragging.disable();
-  } else if (tool === "add") {
+  if (tool === "add") {
     hint.textContent = "Click on the map to place a new house.";
     mapEl.style.cursor = "crosshair";
     map.dragging.enable();
   } else if (tool === "select") {
-    hint.textContent = "Click and drag a rectangle to select houses.";
+    hint.textContent = "Drag a rectangle to select houses. Then assign or delete.";
     mapEl.style.cursor = "crosshair";
     map.dragging.disable();
     _initBoxSelect();
@@ -945,24 +941,7 @@ function _boxMouseUp(e) {
   if (Math.abs(size.x) < 10 && Math.abs(size.y) < 10) return;
 
   // Find houses inside the bounds
-  _clearBoxHighlights();
-  _boxSelectedHouses = [];
-  houseDotLayer.eachLayer(layer => {
-    if (layer.getLatLng && bounds.contains(layer.getLatLng())) {
-      const ll = layer.getLatLng();
-      // Extract house info from the popup content if available
-      const popup = layer.getPopup();
-      const content = popup ? popup.getContent() : "";
-      const addrMatch = content.match(/<b>(.*?)<\/b>/);
-      const address = addrMatch ? addrMatch[1].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"') : "";
-      _boxSelectedHouses.push({ lat: ll.lat, lng: ll.lng, address, _layer: layer });
-      // Highlight
-      const hl = L.circleMarker(ll, { radius: 8, fillColor: "#f59e0b", color: "#fff", weight: 2, fillOpacity: 0.8 }).addTo(map);
-      _boxHighlights.push(hl);
-    }
-  });
-
-  _updateBoxSelectedUI();
+  _selectHousesInBounds(bounds);
 }
 
 function _boxTouchEnd(e) {
@@ -979,16 +958,16 @@ function _boxTouchEnd(e) {
   const size = map.latLngToContainerPoint(bounds.getNorthEast()).subtract(map.latLngToContainerPoint(bounds.getSouthWest()));
   if (Math.abs(size.x) < 10 && Math.abs(size.y) < 10) return;
 
+  _selectHousesInBounds(bounds);
+}
+
+function _selectHousesInBounds(bounds) {
   _clearBoxHighlights();
   _boxSelectedHouses = [];
   houseDotLayer.eachLayer(layer => {
-    if (layer.getLatLng && bounds.contains(layer.getLatLng())) {
+    if (layer.getLatLng && bounds.contains(layer.getLatLng()) && layer._houseId) {
       const ll = layer.getLatLng();
-      const popup = layer.getPopup();
-      const content = popup ? popup.getContent() : "";
-      const addrMatch = content.match(/<b>(.*?)<\/b>/);
-      const address = addrMatch ? addrMatch[1].replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"') : "";
-      _boxSelectedHouses.push({ lat: ll.lat, lng: ll.lng, address, _layer: layer });
+      _boxSelectedHouses.push({ id: layer._houseId, lat: ll.lat, lng: ll.lng, address: layer._address || "", _layer: layer });
       const hl = L.circleMarker(ll, { radius: 8, fillColor: "#f59e0b", color: "#fff", weight: 2, fillOpacity: 0.8 }).addTo(map);
       _boxHighlights.push(hl);
     }
@@ -1029,39 +1008,20 @@ async function boxDeleteSelected() {
   if (!_boxSelectedHouses.length) return;
   if (!confirm(`Delete ${_boxSelectedHouses.length} selected house(s)? This cannot be undone.`)) return;
 
-  // We need to find house IDs — query the API for houses in the bounding box
-  const lats = _boxSelectedHouses.map(h => h.lat);
-  const lngs = _boxSelectedHouses.map(h => h.lng);
-  const params = new URLSearchParams({
-    min_lat: Math.min(...lats) - 0.0001,
-    max_lat: Math.max(...lats) + 0.0001,
-    min_lon: Math.min(...lngs) - 0.0001,
-    max_lon: Math.max(...lngs) + 0.0001,
-    limit: 2000,
-  });
+  const ids = _boxSelectedHouses.map(h => h.id).filter(Boolean);
+  if (!ids.length) { alert("No house IDs found. Zoom in closer and try again."); return; }
+
   try {
-    const r = await authFetch(API + "/api/houses/map?" + params);
-    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.detail || "Failed to query houses."); return; }
-    const houses = await r.json();
-    if (!Array.isArray(houses)) { alert("Unexpected response from server."); return; }
-    // Match by proximity
-    const selectedCoords = new Set(_boxSelectedHouses.map(h => `${h.lat.toFixed(6)},${h.lng.toFixed(6)}`));
-    const ids = houses
-      .filter(h => h.latitude && h.longitude && selectedCoords.has(`${h.latitude.toFixed(6)},${h.longitude.toFixed(6)}`))
-      .map(h => h.id);
-
-    if (!ids.length) { alert("Could not match selected houses."); return; }
-
-    const dr = await authFetch(API + "/api/houses/batch-delete", {
+    const r = await authFetch(API + "/api/houses/batch-delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ house_ids: ids }),
     });
-    if (dr.ok) {
+    if (r.ok) {
       clearBoxSelection();
       refreshMapDots();
     } else {
-      const data = await dr.json();
+      const data = await r.json().catch(() => ({}));
       alert(data.detail || "Error deleting houses.");
     }
   } catch (err) {
@@ -1071,6 +1031,9 @@ async function boxDeleteSelected() {
 
 async function boxAssignSelected() {
   if (!_boxSelectedHouses.length) return;
+  const ids = _boxSelectedHouses.map(h => h.id).filter(Boolean);
+  if (!ids.length) { alert("No house IDs found. Zoom in closer and try again."); return; }
+
   // Prompt for event selection
   let eventsData;
   try {
@@ -1087,30 +1050,9 @@ async function boxAssignSelected() {
 
   const groupLabel = prompt("Group label (optional):", "");
 
-  // Get house IDs by querying the map API
-  const lats = _boxSelectedHouses.map(h => h.lat);
-  const lngs = _boxSelectedHouses.map(h => h.lng);
-  const params = new URLSearchParams({
-    min_lat: Math.min(...lats) - 0.0001,
-    max_lat: Math.max(...lats) + 0.0001,
-    min_lon: Math.min(...lngs) - 0.0001,
-    max_lon: Math.max(...lngs) + 0.0001,
-    limit: 2000,
-  });
-
   try {
-    const r = await authFetch(API + "/api/houses/map?" + params);
-    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.detail || "Failed to query houses."); return; }
-    const houses = await r.json();
-    if (!Array.isArray(houses)) { alert("Unexpected response from server."); return; }
-    const selectedCoords = new Set(_boxSelectedHouses.map(h => `${h.lat.toFixed(6)},${h.lng.toFixed(6)}`));
-    const matchedHouses = houses.filter(h => h.latitude && h.longitude && selectedCoords.has(`${h.latitude.toFixed(6)},${h.longitude.toFixed(6)}`));
-
-    if (!matchedHouses.length) { alert("Could not match selected houses."); return; }
-
-    // Assign each house to the event
     const body = {
-      house_ids: matchedHouses.map(h => h.id),
+      house_ids: ids,
       assigned_to: groupLabel || undefined,
     };
     const ar = await authFetch(API + `/api/events/${ev.id}/assign`, {
@@ -1120,10 +1062,10 @@ async function boxAssignSelected() {
     });
     if (ar.ok) {
       const data = await ar.json();
-      alert(`Assigned ${data.assigned || matchedHouses.length} house(s) to "${ev.name}".`);
+      alert(`Assigned ${data.assigned || ids.length} house(s) to "${ev.name}".`);
       clearBoxSelection();
     } else {
-      const data = await ar.json();
+      const data = await ar.json().catch(() => ({}));
       alert(data.detail || "Error assigning houses.");
     }
   } catch (err) {
@@ -1137,75 +1079,6 @@ function _handleMapToolClick(e) {
   } else if (_mapTool === "boundary" && !_boundaryClosed) {
     _addBoundaryPoint(e.latlng);
   }
-}
-
-// --- Erase tool ---
-function _setupEraseOnDot(dot, houseId, address) {
-  dot.on("click", () => {
-    if (_mapTool !== "erase") return;
-    if (_eraseMarked.has(houseId)) {
-      // Unmark
-      map.removeLayer(_eraseMarked.get(houseId));
-      _eraseMarked.delete(houseId);
-    } else {
-      // Mark with red X
-      const xMarker = L.marker(dot.getLatLng(), {
-        icon: L.divIcon({
-          className: "",
-          html: '<div style="color:#CE1126;font-size:26px;font-weight:900;text-align:center;line-height:30px;text-shadow:0 0 3px #fff,0 0 3px #fff;">✕</div>',
-          iconSize: [30, 30],
-          iconAnchor: [15, 15],
-        }),
-        interactive: false,
-      });
-      xMarker.addTo(map);
-      _eraseMarked.set(houseId, xMarker);
-    }
-    _updateErasePending();
-  });
-}
-
-function _updateErasePending() {
-  const el = document.getElementById("map-erase-pending");
-  const countEl = document.getElementById("map-erase-count");
-  if (_eraseMarked.size > 0) {
-    el.style.display = "";
-    countEl.textContent = _eraseMarked.size;
-  } else {
-    el.style.display = "none";
-  }
-}
-
-async function confirmEraseHouses() {
-  if (!_eraseMarked.size) return;
-  const ids = [..._eraseMarked.keys()];
-  if (!confirm(`Delete ${ids.length} house(s)? This cannot be undone.`)) return;
-
-  try {
-    const r = await authFetch(API + "/api/houses/batch-delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ house_ids: ids }),
-    });
-    const data = await r.json();
-    if (r.ok) {
-      // Remove X markers
-      _eraseMarked.forEach(m => map.removeLayer(m));
-      _eraseMarked.clear();
-      _updateErasePending();
-      refreshMapDots();
-    } else {
-      alert(data.detail || "Error deleting houses.");
-    }
-  } catch (err) {
-    alert("Network error: " + err.message);
-  }
-}
-
-function cancelErase() {
-  _eraseMarked.forEach(m => map.removeLayer(m));
-  _eraseMarked.clear();
-  _updateErasePending();
 }
 
 // --- Boundary tool ---

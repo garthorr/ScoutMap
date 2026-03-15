@@ -141,8 +141,7 @@
       </div>
       <div id="map-toolbar" style="margin-bottom:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
         <button id="map-tool-pointer" class="btn-sm map-tool active" onclick="setMapTool('pointer')" title="Pan / select">Pointer</button>
-        <button id="map-tool-select" class="btn-sm map-tool" onclick="setMapTool('select')" title="Draw box to select houses">Box Select</button>
-        <button id="map-tool-erase" class="btn-sm map-tool" onclick="setMapTool('erase')" title="Click houses to remove them" style="color:var(--sa-red);">Erase</button>
+        <button id="map-tool-select" class="btn-sm map-tool" onclick="setMapTool('select')" title="Draw box to select houses, then assign or delete">Select</button>
         <button id="map-tool-add" class="btn-sm map-tool" onclick="setMapTool('add')" title="Click map to add a house" style="color:#059669;">Add</button>
         <button id="map-tool-boundary" class="btn-sm map-tool" onclick="setMapTool('boundary')" title="Draw polygon boundary to select houses" style="color:var(--sa-dark-blue);">Boundary</button>
         <span id="map-tool-hint" style="font-size:13px;color:var(--sa-gray);margin-left:8px;"></span>
@@ -163,15 +162,10 @@
           <button class="btn-sm" onclick="boundaryImportFromArcGIS()" style="background:#059669;" title="Fetch houses from ArcGIS within this boundary">Import from ArcGIS</button>
           <button class="btn-sm" onclick="clearBoundary()">Clear</button>
         </span>
-        <span id="map-erase-pending" style="font-size:13px;color:var(--sa-red);margin-left:auto;display:none;">
-          <span id="map-erase-count">0</span> marked
-          <button class="btn-sm btn-danger" onclick="confirmEraseHouses()" style="margin-left:4px;">Delete</button>
-          <button class="btn-sm" onclick="cancelErase()" style="margin-left:2px;">Cancel</button>
-        </span>
         <span id="map-box-selected" style="font-size:13px;color:var(--sa-dark-blue);margin-left:auto;display:none;">
           <span id="map-box-count">0</span> selected
-          <button class="btn-sm btn-danger" onclick="boxDeleteSelected()" style="margin-left:4px;">Delete</button>
           <button class="btn-sm" onclick="boxAssignSelected()" style="margin-left:4px;">Assign to Event</button>
+          <button class="btn-sm btn-danger" onclick="boxDeleteSelected()" style="margin-left:4px;">Delete</button>
           <button class="btn-sm" onclick="clearBoxSelection()" style="margin-left:2px;">Clear</button>
         </span>
       </div>
