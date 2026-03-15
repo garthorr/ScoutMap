@@ -114,9 +114,7 @@ async def import_roster_csv(file: UploadFile = File(...), _admin: str = Depends(
             continue
 
         scout_id = (row.get("scout_id") or row.get("id") or "").strip() or None
-        password = (row.get("password") or "").strip() or None
-        pw_hash = _hash_password(password) if password and len(password) >= 4 else None
-        db.add(ScoutRoster(name=name, scout_id=scout_id, password_hash=pw_hash))
+        db.add(ScoutRoster(name=name, scout_id=scout_id))
         existing.add(name.lower())
         added += 1
 

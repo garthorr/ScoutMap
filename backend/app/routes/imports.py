@@ -58,8 +58,11 @@ async def create_import(
     db.add(si)
     db.flush()
 
-    # Save uploaded file
-    dest = UPLOAD_DIR / f"{si.id}_{file.filename}"
+    # Save uploaded file (sanitize filename to prevent path traversal)
+    safe_name = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
+    if not safe_name:
+        safe_name = "upload"
+    dest = UPLOAD_DIR / f"{si.id}_{safe_name}"
     with open(dest, "wb") as f_out:
         shutil.copyfileobj(file.file, f_out)
 

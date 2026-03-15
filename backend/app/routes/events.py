@@ -203,10 +203,11 @@ def create_walk_groups(
     if not event:
         raise HTTPException(404, "Event not found")
 
-    # Fetch all EventHouse rows for this event, joined with MasterHouse
+    # Fetch all EventHouse rows for this event with eager-loaded MasterHouse
     event_houses = (
         db.query(EventHouse)
         .join(MasterHouse, EventHouse.house_id == MasterHouse.id)
+        .options(joinedload(EventHouse.house))
         .filter(
             EventHouse.event_id == event.id,
             MasterHouse.street_name.isnot(None),
@@ -217,16 +218,10 @@ def create_walk_groups(
     if not event_houses:
         return {"groups": [], "total_assigned": 0, "message": "No houses assigned to this event yet. Assign houses first."}
 
-    # Build a map of house_id -> MasterHouse for street/address info
-    house_ids = [eh.house_id for eh in event_houses]
-    houses_by_id = {}
-    for h in db.query(MasterHouse).filter(MasterHouse.id.in_(house_ids)).all():
-        houses_by_id[h.id] = h
-
     # Group by street, sort within each street by address number
     by_street: dict[str, list] = defaultdict(list)
     for eh in event_houses:
-        h = houses_by_id.get(eh.house_id)
+        h = eh.house
         if not h or not h.street_name:
             continue
         street = h.street_name.upper().strip()
