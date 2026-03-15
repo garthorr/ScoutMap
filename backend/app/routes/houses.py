@@ -1,6 +1,7 @@
 """House endpoints – browse, add, and remove master house records."""
 
 from collections import defaultdict
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.database import get_db
-from app.models import MasterHouse, HouseSourceLink, EventHouse, Visit, UnmatchedRecord
+from app.models import MasterHouse, HouseSourceLink, EventHouse, Visit, UnmatchedRecord, FundraiserEvent
 from app.schemas import MasterHouseOut, MasterHouseCreate
 from app.address import normalize_address, parse_address_parts
 from app.routes.auth import require_admin
@@ -104,6 +105,100 @@ def list_zip_codes(db: Session = Depends(get_db)):
         .all()
     )
     return [{"zip_code": z, "count": c} for z, c in rows]
+
+
+class PolygonQueryRequest(BaseModel):
+    polygon: list[list[float]]  # [[lat, lng], [lat, lng], ...]
+    event_id: Optional[str] = None
+    assigned_to: Optional[str] = None
+    count_only: bool = False
+
+
+def _point_in_polygon(lat: float, lng: float, polygon: list[list[float]]) -> bool:
+    """Ray-casting algorithm for point-in-polygon test."""
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        yi, xi = polygon[i]
+        yj, xj = polygon[j]
+        if ((yi > lat) != (yj > lat)) and (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+@router.post("/in-polygon")
+def houses_in_polygon(body: PolygonQueryRequest, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
+    """Find all houses inside a polygon boundary and optionally assign to an event.
+
+    Uses bounding-box pre-filter in SQL then ray-casting in Python.
+    Handles tens of thousands of houses efficiently.
+    """
+    if len(body.polygon) < 3:
+        raise HTTPException(400, "Polygon must have at least 3 points")
+
+    # Compute bounding box for fast SQL pre-filter
+    lats = [p[0] for p in body.polygon]
+    lngs = [p[1] for p in body.polygon]
+    min_lat, max_lat = min(lats), max(lats)
+    min_lng, max_lng = min(lngs), max(lngs)
+
+    # Query all houses in the bounding box (no limit - support tens of thousands)
+    candidates = (
+        db.query(MasterHouse.id, MasterHouse.latitude, MasterHouse.longitude)
+        .filter(
+            MasterHouse.latitude.isnot(None),
+            MasterHouse.longitude.isnot(None),
+            MasterHouse.latitude.between(min_lat, max_lat),
+            MasterHouse.longitude.between(min_lng, max_lng),
+        )
+        .all()
+    )
+
+    # Ray-casting filter
+    inside_ids = []
+    for hid, hlat, hlng in candidates:
+        if _point_in_polygon(hlat, hlng, body.polygon):
+            inside_ids.append(hid)
+
+    if body.count_only:
+        return {"count": len(inside_ids)}
+
+    # Optionally assign to event
+    assigned = 0
+    if body.event_id and inside_ids:
+        event = db.query(FundraiserEvent).filter(FundraiserEvent.id == body.event_id).first()
+        if not event:
+            raise HTTPException(400, "Event not found")
+
+        # Batch check existing assignments
+        already = set()
+        # Process in chunks to avoid SQL parameter limits
+        for i in range(0, len(inside_ids), 500):
+            chunk = inside_ids[i:i + 500]
+            already.update(
+                row[0] for row in
+                db.query(EventHouse.house_id)
+                .filter(EventHouse.event_id == event.id, EventHouse.house_id.in_(chunk))
+                .all()
+            )
+
+        for hid in inside_ids:
+            if hid not in already:
+                db.add(EventHouse(
+                    event_id=event.id,
+                    house_id=hid,
+                    assigned_to=body.assigned_to,
+                ))
+                assigned += 1
+        db.commit()
+
+    return {
+        "count": len(inside_ids),
+        "house_ids": [str(hid) for hid in inside_ids],
+        "assigned": assigned,
+    }
 
 
 @router.get("/{house_id}", response_model=MasterHouseOut)
