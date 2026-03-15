@@ -54,6 +54,7 @@ class ArcGISFetchRequest(BaseModel):
     bbox_ymin: Optional[float] = None
     bbox_xmax: Optional[float] = None
     bbox_ymax: Optional[float] = None
+    polygon: Optional[list[list[float]]] = None  # [[lat, lng], ...] for boundary import
     max_records: int = 2000
     notes: Optional[str] = None
     event_id: Optional[str] = None
@@ -149,11 +150,32 @@ async def _fetch_all_pages(
     where: str,
     bbox: Optional[dict],
     max_records: int,
+    polygon: Optional[list[list[float]]] = None,
 ) -> list[dict]:
     """Page through ArcGIS results using resultOffset/resultRecordCount."""
     all_features: list[dict] = []
     offset = 0
     page_size = min(MAX_PAGE_SIZE, max_records)
+
+    # Build geometry filter: polygon takes priority over bbox
+    geom_params = {}
+    if polygon and len(polygon) >= 3:
+        # Convert [[lat,lng],...] to ArcGIS polygon rings [[lng,lat],...]
+        ring = [[pt[1], pt[0]] for pt in polygon]
+        ring.append(ring[0])  # close ring
+        geom_params = {
+            "geometry": json.dumps({"rings": [ring], "spatialReference": {"wkid": 4326}}),
+            "geometryType": "esriGeometryPolygon",
+            "spatialRel": "esriSpatialRelContains",
+            "inSR": "4326",
+        }
+    elif bbox:
+        geom_params = {
+            "geometry": json.dumps(bbox),
+            "geometryType": "esriGeometryEnvelope",
+            "spatialRel": "esriSpatialRelIntersects",
+            "inSR": "4326",
+        }
 
     async with httpx.AsyncClient(timeout=60) as client:
         while len(all_features) < max_records:
@@ -165,12 +187,8 @@ async def _fetch_all_pages(
                 "f": "json",
                 "resultOffset": offset,
                 "resultRecordCount": page_size,
+                **geom_params,
             }
-            if bbox:
-                params["geometry"] = json.dumps(bbox)
-                params["geometryType"] = "esriGeometryEnvelope"
-                params["spatialRel"] = "esriSpatialRelIntersects"
-                params["inSR"] = "4326"
 
             logger.info("ArcGIS query: where=%s offset=%s limit=%s", where, offset, page_size)
             resp = await client.get(ARCGIS_QUERY, params=params)
@@ -239,20 +257,29 @@ async def test_arcgis_connection():
 
 class ArcGISCountRequest(BaseModel):
     zip_codes: Optional[list[str]] = None
+    polygon: Optional[list[list[float]]] = None
 
 
 @router.post("/count")
 async def count_arcgis_parcels(req: ArcGISCountRequest, _admin: str = Depends(require_admin)):
-    """Query ArcGIS to get the record count for given ZIP codes without fetching data."""
+    """Query ArcGIS to get the record count for given ZIP codes or polygon without fetching data."""
     where_req = ArcGISFetchRequest(zip_codes=req.zip_codes)
     where = _build_where(where_req)
+    params: dict = {
+        "where": where,
+        "returnCountOnly": "true",
+        "f": "json",
+    }
+    if req.polygon and len(req.polygon) >= 3:
+        ring = [[pt[1], pt[0]] for pt in req.polygon]
+        ring.append(ring[0])
+        params["geometry"] = json.dumps({"rings": [ring], "spatialReference": {"wkid": 4326}})
+        params["geometryType"] = "esriGeometryPolygon"
+        params["spatialRel"] = "esriSpatialRelContains"
+        params["inSR"] = "4326"
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(ARCGIS_QUERY, params={
-                "where": where,
-                "returnCountOnly": "true",
-                "f": "json",
-            })
+            resp = await client.get(ARCGIS_QUERY, params=params)
             data = resp.json()
             if "error" in data:
                 return {"count": None, "error": data["error"].get("message", str(data["error"]))}
@@ -279,9 +306,9 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
             "xmax": req.bbox_xmax, "ymax": req.bbox_ymax,
         }
 
-    features = await _fetch_all_pages(where, bbox, req.max_records)
+    features = await _fetch_all_pages(where, bbox, req.max_records, polygon=req.polygon)
     if not features:
-        return {"status": "ok", "fetched": 0, "imported": 0, "message": "No parcels found for that query."}
+        return {"status": "ok", "fetched": 0, "imported": 0, "assigned": 0, "message": "No parcels found for that query."}
 
     batch_id = str(uuid.uuid4())
     si = SourceImport(
