@@ -344,25 +344,49 @@ function initMap() {
 async function refreshMapDots() {
   if (!map) return;
   const b = map.getBounds();
+  const zoom = map.getZoom();
+
+  // Determine detail level and limit based on zoom
+  // zoom < 13: lightweight dots only (fast), zoom >= 15: full detail with popups
+  const useFullDetail = zoom >= 15;
+  const limit = zoom >= 17 ? 5000 : zoom >= 15 ? 3000 : zoom >= 13 ? 2000 : 1000;
+  const dotRadius = zoom >= 16 ? 5 : zoom >= 14 ? 4 : 3;
+
   const params = new URLSearchParams({
     min_lat: b.getSouth(), max_lat: b.getNorth(),
     min_lon: b.getWest(), max_lon: b.getEast(),
-    limit: 2000,
+    limit,
   });
-  const r = await authFetch(API + "/api/houses/map?" + params);
-  const houses = await r.json();
+
   houseDotLayer.clearLayers();
-  houses.forEach(h => {
-    if (!h.latitude || !h.longitude) return;
-    const dot = L.circleMarker([h.latitude, h.longitude], {
-      radius: 5, fillColor: "#003F87", color: "#003F87",
-      weight: 1, opacity: 0.8, fillOpacity: 0.6,
+
+  if (useFullDetail) {
+    // Full data with popups for close zoom
+    const r = await authFetch(API + "/api/houses/map?" + params);
+    const houses = await r.json();
+    houses.forEach(h => {
+      if (!h.latitude || !h.longitude) return;
+      const dot = L.circleMarker([h.latitude, h.longitude], {
+        radius: dotRadius, fillColor: "#003F87", color: "#003F87",
+        weight: 1, opacity: 0.8, fillOpacity: 0.6,
+      });
+      dot.bindPopup(`<b>${esc(h.full_address)}</b><br>${esc(h.owner_name || "")}<br>` +
+        (h.total_appraised_value ? `Appraised: $${h.total_appraised_value.toLocaleString()}` : ""));
+      _setupEraseOnDot(dot, h.id, h.full_address);
+      houseDotLayer.addLayer(dot);
     });
-    dot.bindPopup(`<b>${esc(h.full_address)}</b><br>${esc(h.owner_name)}<br>` +
-      (h.total_appraised_value ? `Appraised: $${h.total_appraised_value.toLocaleString()}` : ""));
-    _setupEraseOnDot(dot, h.id, h.full_address);
-    houseDotLayer.addLayer(dot);
-  });
+  } else {
+    // Lightweight dots — just coordinates, no popups (much faster)
+    const r = await authFetch(API + "/api/houses/map/dots?" + params);
+    const dots = await r.json();
+    dots.forEach(d => {
+      const dot = L.circleMarker([d.lat, d.lon], {
+        radius: dotRadius, fillColor: "#003F87", color: "#003F87",
+        weight: 0.5, opacity: 0.6, fillOpacity: 0.4,
+      });
+      houseDotLayer.addLayer(dot);
+    });
+  }
 }
 
 async function _loadMapEventSelect() {
@@ -1277,6 +1301,73 @@ async function closeBoundary() {
     }
   } catch (err) {
     document.getElementById("map-boundary-count").textContent = "error";
+  }
+
+  // Also query ArcGIS for how many parcels exist in this boundary
+  document.getElementById("map-boundary-arcgis-count").textContent = "(checking ArcGIS…)";
+  try {
+    const r = await authFetch(API + "/api/arcgis/count", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ polygon: _boundaryPoints }),
+    });
+    const data = await r.json();
+    if (data.count !== null && data.count !== undefined) {
+      document.getElementById("map-boundary-arcgis-count").textContent =
+        `(${data.count.toLocaleString()} in ArcGIS)`;
+    } else {
+      document.getElementById("map-boundary-arcgis-count").textContent = "";
+    }
+  } catch { document.getElementById("map-boundary-arcgis-count").textContent = ""; }
+}
+
+async function boundaryImportFromArcGIS() {
+  if (!_boundaryPoints.length) return;
+  const arcgisCountText = document.getElementById("map-boundary-arcgis-count").textContent;
+  const eventId = document.getElementById("map-boundary-event").value || undefined;
+  const groupLabel = document.getElementById("map-boundary-group").value.trim() || undefined;
+
+  let msg = `Import all ArcGIS parcels within this boundary ${arcgisCountText}?`;
+  if (eventId) msg += "\n\nImported houses will also be assigned to the selected event.";
+  if (!confirm(msg)) return;
+
+  document.getElementById("map-boundary-arcgis-count").textContent = "(importing…)";
+  try {
+    const body = {
+      polygon: _boundaryPoints,
+      max_records: 10000,
+      notes: "Boundary import from map",
+    };
+    if (eventId) body.event_id = eventId;
+    const r = await authFetch(API + "/api/arcgis/fetch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      let result = `Fetched ${data.fetched} parcels, imported ${data.imported} records.`;
+      if (data.assigned) result += ` ${data.assigned} assigned to "${data.event_name}".`;
+      document.getElementById("map-boundary-arcgis-count").textContent = `(${data.imported} imported)`;
+      alert(result);
+      refreshMapDots();
+      // Re-count local houses in boundary
+      try {
+        const cr = await authFetch(API + "/api/houses/in-polygon", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ polygon: _boundaryPoints, count_only: true }),
+        });
+        const cd = await cr.json();
+        if (cr.ok) document.getElementById("map-boundary-count").textContent = (cd.count || 0).toLocaleString();
+      } catch {}
+    } else {
+      alert("Error: " + (data.detail || JSON.stringify(data)));
+      document.getElementById("map-boundary-arcgis-count").textContent = arcgisCountText;
+    }
+  } catch (err) {
+    alert("Network error: " + err.message);
+    document.getElementById("map-boundary-arcgis-count").textContent = arcgisCountText;
   }
 }
 

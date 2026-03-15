@@ -49,10 +49,10 @@
         <span class="nav-phase-label">Prepare</span>
         <a href="#" onclick="showPage('events', event)">Events</a>
         <a href="#" onclick="showPage('imports', event)">Import Data</a>
+        <a href="#" onclick="showPage('map', event)">Map</a>
         <a href="#" onclick="showPage('roster', event)">Scouts</a>
         <span class="nav-divider"></span>
         <span class="nav-phase-label">Organize</span>
-        <a href="#" onclick="showPage('map', event)">Map</a>
         <a href="#" onclick="showPage('houses', event)">Houses</a>
         <a href="#" onclick="showPage('walk-groups', event)">Walk Groups</a>
         <span class="nav-divider"></span>
@@ -152,14 +152,16 @@
           <button class="btn-sm" onclick="closeBoundary()" style="margin-left:2px;" title="Close polygon and count houses">Close Polygon</button>
           <button class="btn-sm" onclick="clearBoundary()" style="margin-left:2px;">Clear</button>
         </span>
-        <span id="map-boundary-result" style="font-size:13px;color:var(--sa-dark-blue);margin-left:auto;display:none;">
+        <span id="map-boundary-result" style="font-size:13px;color:var(--sa-dark-blue);margin-left:auto;display:none;flex-wrap:wrap;gap:4px;align-items:center;">
           <strong><span id="map-boundary-count">0</span> houses</strong> in boundary
-          <select id="map-boundary-event" style="margin-left:6px;font-size:13px;padding:2px 4px;">
+          <span id="map-boundary-arcgis-count" style="color:var(--sa-gray);"></span>
+          <select id="map-boundary-event" style="font-size:13px;padding:2px 4px;">
             <option value="">Select event…</option>
           </select>
-          <input id="map-boundary-group" placeholder="Group label (optional)" style="margin-left:4px;width:140px;font-size:13px;padding:2px 6px;" />
-          <button class="btn-sm" onclick="boundaryAssignToEvent()" style="margin-left:4px;">Assign</button>
-          <button class="btn-sm" onclick="clearBoundary()" style="margin-left:2px;">Clear</button>
+          <input id="map-boundary-group" placeholder="Group label (optional)" style="width:140px;font-size:13px;padding:2px 6px;" />
+          <button class="btn-sm" onclick="boundaryAssignToEvent()">Assign</button>
+          <button class="btn-sm" onclick="boundaryImportFromArcGIS()" style="background:#059669;" title="Fetch houses from ArcGIS within this boundary">Import from ArcGIS</button>
+          <button class="btn-sm" onclick="clearBoundary()">Clear</button>
         </span>
         <span id="map-erase-pending" style="font-size:13px;color:var(--sa-red);margin-left:auto;display:none;">
           <span id="map-erase-count">0</span> marked

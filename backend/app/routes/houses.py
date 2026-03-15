@@ -40,7 +40,7 @@ def houses_for_map(
     min_lon: float = Query(...),
     max_lat: float = Query(...),
     max_lon: float = Query(...),
-    limit: int = Query(500, le=2000),
+    limit: int = Query(500, le=5000),
     db: Session = Depends(get_db),
 ):
     return (
@@ -54,6 +54,30 @@ def houses_for_map(
         .limit(limit)
         .all()
     )
+
+
+@router.get("/map/dots")
+def houses_dots_fast(
+    min_lat: float = Query(...),
+    min_lon: float = Query(...),
+    max_lat: float = Query(...),
+    max_lon: float = Query(...),
+    limit: int = Query(500, le=10000),
+    db: Session = Depends(get_db),
+):
+    """Lightweight endpoint returning only id, lat, lon for fast map rendering."""
+    rows = (
+        db.query(MasterHouse.id, MasterHouse.latitude, MasterHouse.longitude)
+        .filter(
+            MasterHouse.latitude.isnot(None),
+            MasterHouse.longitude.isnot(None),
+            MasterHouse.latitude.between(min_lat, max_lat),
+            MasterHouse.longitude.between(min_lon, max_lon),
+        )
+        .limit(limit)
+        .all()
+    )
+    return [{"id": str(r[0]), "lat": r[1], "lon": r[2]} for r in rows]
 
 
 @router.get("/streets")
