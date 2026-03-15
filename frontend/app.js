@@ -329,6 +329,12 @@ function initMap() {
     let _mapMoveTimer;
     map.on("moveend", () => { clearTimeout(_mapMoveTimer); _mapMoveTimer = setTimeout(refreshMapDots, 300); });
     map.on("click", _handleMapToolClick);
+    map.on("dblclick", (e) => {
+      if (_mapTool === "boundary" && !_boundaryClosed && _boundaryPoints.length >= 3) {
+        L.DomEvent.stopPropagation(e);
+        closeBoundary();
+      }
+    });
     refreshMapDots();
     _loadMapEventSelect();
     _loadMapZipSelect();
@@ -772,7 +778,7 @@ function copySelectedStreets() {
 }
 
 // --- Map tools: erase, add, box-select ---
-let _mapTool = "pointer";       // "pointer" | "erase" | "add" | "select"
+let _mapTool = "pointer";       // "pointer" | "erase" | "add" | "select" | "boundary"
 let _eraseMarked = new Map();   // house_id -> L.marker (X markers for pending deletes)
 let _addMarker = null;          // temp marker for add mode
 
@@ -782,6 +788,15 @@ let _boxSelectStart = null;     // {lat, lng} of mousedown
 let _boxSelectedHouses = [];    // array of {id, lat, lng, address, marker}
 let _boxHighlights = [];        // L.circleMarker highlights for selected houses
 
+// Boundary tool state
+let _boundaryPoints = [];       // [[lat, lng], ...]
+let _boundaryMarkers = [];      // L.circleMarker for each vertex
+let _boundaryLines = null;      // L.polyline showing edges
+let _boundaryPolygon = null;    // L.polygon when closed
+let _boundaryHouseHighlights = []; // L.circleMarker for houses inside
+let _boundaryClosed = false;
+let _boundaryHouseIds = [];     // house IDs found inside
+
 function setMapTool(tool) {
   // Clean up previous tool state
   if (_mapTool === "erase" && tool !== "erase") cancelErase();
@@ -789,6 +804,7 @@ function setMapTool(tool) {
     map.removeLayer(_addMarker); _addMarker = null;
   }
   if (_mapTool === "select" && tool !== "select") clearBoxSelection();
+  if (_mapTool === "boundary" && tool !== "boundary") clearBoundary();
 
   _mapTool = tool;
   document.querySelectorAll(".map-tool").forEach(b => b.classList.remove("active"));
@@ -809,10 +825,18 @@ function setMapTool(tool) {
     mapEl.style.cursor = "crosshair";
     map.dragging.disable();
     _initBoxSelect();
+  } else if (tool === "boundary") {
+    hint.textContent = "Click to add points. Double-click or click Close to finish.";
+    mapEl.style.cursor = "crosshair";
+    map.dragging.enable();
+    map.doubleClickZoom.disable();
+    document.getElementById("map-boundary-ui").style.display = "";
+    _boundaryUpdateStatus();
   } else {
     hint.textContent = "";
     mapEl.style.cursor = "";
     map.dragging.enable();
+    map.doubleClickZoom.enable();
   }
 }
 
@@ -1021,6 +1045,8 @@ async function boxAssignSelected() {
 function _handleMapToolClick(e) {
   if (_mapTool === "add") {
     _placeAddMarker(e.latlng);
+  } else if (_mapTool === "boundary" && !_boundaryClosed) {
+    _addBoundaryPoint(e.latlng);
   }
 }
 
@@ -1092,6 +1118,158 @@ function cancelErase() {
   _eraseMarked.clear();
   _updateErasePending();
 }
+
+// --- Boundary tool ---
+function _addBoundaryPoint(latlng) {
+  const pt = [latlng.lat, latlng.lng];
+
+  // If clicking near the first point and we have 3+ points, close the polygon
+  if (_boundaryPoints.length >= 3) {
+    const first = _boundaryPoints[0];
+    const dist = map.latLngToContainerPoint(latlng).distanceTo(
+      map.latLngToContainerPoint(L.latLng(first[0], first[1]))
+    );
+    if (dist < 15) { closeBoundary(); return; }
+  }
+
+  _boundaryPoints.push(pt);
+
+  // Add vertex marker
+  const marker = L.circleMarker(latlng, {
+    radius: 6, color: "#003F87", fillColor: "#fff", fillOpacity: 1, weight: 2,
+  }).addTo(map);
+  _boundaryMarkers.push(marker);
+
+  // Update polyline
+  _updateBoundaryLine();
+  _boundaryUpdateStatus();
+}
+
+function _updateBoundaryLine() {
+  if (_boundaryLines) map.removeLayer(_boundaryLines);
+  if (_boundaryPoints.length >= 2) {
+    _boundaryLines = L.polyline(_boundaryPoints, {
+      color: "#003F87", weight: 2, dashArray: "6 4", opacity: 0.8,
+    }).addTo(map);
+  }
+}
+
+function _boundaryUpdateStatus() {
+  const el = document.getElementById("map-boundary-status");
+  if (el) el.textContent = `${_boundaryPoints.length} points`;
+}
+
+function undoBoundaryPoint() {
+  if (_boundaryClosed) return;
+  if (!_boundaryPoints.length) return;
+  _boundaryPoints.pop();
+  const m = _boundaryMarkers.pop();
+  if (m) map.removeLayer(m);
+  _updateBoundaryLine();
+  _boundaryUpdateStatus();
+}
+
+async function closeBoundary() {
+  if (_boundaryPoints.length < 3) { alert("Need at least 3 points to close a polygon."); return; }
+  _boundaryClosed = true;
+
+  // Remove polyline, draw filled polygon
+  if (_boundaryLines) { map.removeLayer(_boundaryLines); _boundaryLines = null; }
+  _boundaryPolygon = L.polygon(_boundaryPoints, {
+    color: "#003F87", weight: 2, fillColor: "#003F87", fillOpacity: 0.1,
+  }).addTo(map);
+
+  // Hide drawing UI, show result UI
+  document.getElementById("map-boundary-ui").style.display = "none";
+  document.getElementById("map-boundary-result").style.display = "";
+  document.getElementById("map-boundary-count").textContent = "counting…";
+  document.getElementById("map-tool-hint").textContent = "";
+
+  // Load event dropdown
+  try {
+    const r = await authFetch(API + "/api/events/");
+    if (r.ok) {
+      const events = await r.json();
+      const sel = document.getElementById("map-boundary-event");
+      sel.innerHTML = '<option value="">Select event…</option>' +
+        events.map(ev => `<option value="${esc(ev.id)}">${esc(ev.name)}</option>`).join("");
+    }
+  } catch {}
+
+  // Query house count
+  try {
+    const r = await authFetch(API + "/api/houses/in-polygon", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ polygon: _boundaryPoints, count_only: true }),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      document.getElementById("map-boundary-count").textContent =
+        (data.count || 0).toLocaleString();
+    } else {
+      document.getElementById("map-boundary-count").textContent = "error";
+    }
+  } catch (err) {
+    document.getElementById("map-boundary-count").textContent = "error";
+  }
+}
+
+async function boundaryAssignToEvent() {
+  const eventId = document.getElementById("map-boundary-event").value;
+  if (!eventId) { alert("Select an event first."); return; }
+  const groupLabel = document.getElementById("map-boundary-group").value.trim() || undefined;
+
+  const countText = document.getElementById("map-boundary-count").textContent;
+  if (!confirm(`Assign ${countText} houses in this boundary to the selected event?`)) return;
+
+  document.getElementById("map-boundary-count").textContent = "assigning…";
+  try {
+    const r = await authFetch(API + "/api/houses/in-polygon", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        polygon: _boundaryPoints,
+        event_id: eventId,
+        assigned_to: groupLabel,
+      }),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      const msg = `${data.assigned} houses assigned (${data.count} total in boundary)`;
+      document.getElementById("map-boundary-count").textContent = data.count.toLocaleString();
+      alert(msg);
+      // Highlight assigned houses on map
+      _showBoundaryHouses(data.house_ids);
+    } else {
+      alert("Error: " + (data.detail || JSON.stringify(data)));
+      document.getElementById("map-boundary-count").textContent = countText;
+    }
+  } catch (err) {
+    alert("Network error: " + err.message);
+    document.getElementById("map-boundary-count").textContent = countText;
+  }
+}
+
+function _showBoundaryHouses(houseIds) {
+  // We already have the polygon on the map; no need to re-highlight
+  // but we update the count to reflect assigned count
+}
+
+function clearBoundary() {
+  _boundaryPoints = [];
+  _boundaryClosed = false;
+  _boundaryHouseIds = [];
+  _boundaryMarkers.forEach(m => map.removeLayer(m));
+  _boundaryMarkers = [];
+  if (_boundaryLines) { map.removeLayer(_boundaryLines); _boundaryLines = null; }
+  if (_boundaryPolygon) { map.removeLayer(_boundaryPolygon); _boundaryPolygon = null; }
+  _boundaryHouseHighlights.forEach(m => map.removeLayer(m));
+  _boundaryHouseHighlights = [];
+  document.getElementById("map-boundary-ui").style.display = "none";
+  document.getElementById("map-boundary-result").style.display = "none";
+}
+
 
 // --- Add tool ---
 function _placeAddMarker(latlng) {

@@ -144,7 +144,23 @@
         <button id="map-tool-select" class="btn-sm map-tool" onclick="setMapTool('select')" title="Draw box to select houses">Box Select</button>
         <button id="map-tool-erase" class="btn-sm map-tool" onclick="setMapTool('erase')" title="Click houses to remove them" style="color:var(--sa-red);">Erase</button>
         <button id="map-tool-add" class="btn-sm map-tool" onclick="setMapTool('add')" title="Click map to add a house" style="color:#059669;">Add</button>
+        <button id="map-tool-boundary" class="btn-sm map-tool" onclick="setMapTool('boundary')" title="Draw polygon boundary to select houses" style="color:var(--sa-dark-blue);">Boundary</button>
         <span id="map-tool-hint" style="font-size:13px;color:var(--sa-gray);margin-left:8px;"></span>
+        <span id="map-boundary-ui" style="font-size:13px;color:var(--sa-dark-blue);margin-left:auto;display:none;">
+          <span id="map-boundary-status"></span>
+          <button class="btn-sm" onclick="undoBoundaryPoint()" style="margin-left:4px;" title="Remove last point">Undo</button>
+          <button class="btn-sm" onclick="closeBoundary()" style="margin-left:2px;" title="Close polygon and count houses">Close Polygon</button>
+          <button class="btn-sm" onclick="clearBoundary()" style="margin-left:2px;">Clear</button>
+        </span>
+        <span id="map-boundary-result" style="font-size:13px;color:var(--sa-dark-blue);margin-left:auto;display:none;">
+          <strong><span id="map-boundary-count">0</span> houses</strong> in boundary
+          <select id="map-boundary-event" style="margin-left:6px;font-size:13px;padding:2px 4px;">
+            <option value="">Select event…</option>
+          </select>
+          <input id="map-boundary-group" placeholder="Group label (optional)" style="margin-left:4px;width:140px;font-size:13px;padding:2px 6px;" />
+          <button class="btn-sm" onclick="boundaryAssignToEvent()" style="margin-left:4px;">Assign</button>
+          <button class="btn-sm" onclick="clearBoundary()" style="margin-left:2px;">Clear</button>
+        </span>
         <span id="map-erase-pending" style="font-size:13px;color:var(--sa-red);margin-left:auto;display:none;">
           <span id="map-erase-count">0</span> marked
           <button class="btn-sm btn-danger" onclick="confirmEraseHouses()" style="margin-left:4px;">Delete</button>
