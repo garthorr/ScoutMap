@@ -370,8 +370,15 @@ function initMap() {
   }, 100);
 }
 
+let _refreshAbort = null; // AbortController for in-flight map refresh
 async function refreshMapDots() {
   if (!map) return;
+
+  // Cancel any in-flight refresh to avoid stale responses
+  if (_refreshAbort) _refreshAbort.abort();
+  _refreshAbort = new AbortController();
+  const signal = _refreshAbort.signal;
+
   const b = map.getBounds();
   const zoom = map.getZoom();
 
@@ -393,8 +400,10 @@ async function refreshMapDots() {
   try {
   if (useFullDetail) {
     // Full data with popups for close zoom
-    const r = await authFetch(API + "/api/houses/map?" + params);
+    const r = await authFetch(API + "/api/houses/map?" + params, { signal });
+    if (!r.ok) throw new Error("Map data request failed");
     const houses = await r.json();
+    if (signal.aborted) return;
     houses.forEach(h => {
       if (!h.latitude || !h.longitude) return;
       const dot = L.circleMarker([h.latitude, h.longitude], {
@@ -409,8 +418,10 @@ async function refreshMapDots() {
     });
   } else {
     // Lightweight dots — just coordinates, no popups (much faster)
-    const r = await authFetch(API + "/api/houses/map/dots?" + params);
+    const r = await authFetch(API + "/api/houses/map/dots?" + params, { signal });
+    if (!r.ok) throw new Error("Map dots request failed");
     const dots = await r.json();
+    if (signal.aborted) return;
     dots.forEach(d => {
       const dot = L.circleMarker([d.lat, d.lon], {
         radius: dotRadius, fillColor: "#003F87", color: "#003F87",
@@ -420,6 +431,8 @@ async function refreshMapDots() {
       houseDotLayer.addLayer(dot);
     });
   }
+  } catch (err) {
+    if (err.name !== "AbortError") console.warn("refreshMapDots error:", err);
   } finally {
     _hideMapLoading();
   }
@@ -1259,33 +1272,38 @@ async function boundaryImportFromArcGIS() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const data = await r.json();
-    if (r.ok) {
-      let result = `Fetched ${data.fetched} parcels, imported ${data.imported} records.`;
-      if (data.assigned) result += ` ${data.assigned} assigned to "${data.event_name}".`;
-      document.getElementById("map-boundary-arcgis-count").textContent = `(${data.imported} imported)`;
-      _flashStatus(`Imported ${data.imported} parcels from ArcGIS.`);
-      refreshMapDots();
-      // Re-count local houses in boundary
-      try {
-        const cr = await authFetch(API + "/api/houses/in-polygon", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ polygon: _boundaryPoints, count_only: true }),
-        });
-        const cd = await cr.json();
-        if (cr.ok) document.getElementById("map-boundary-count").textContent = (cd.count || 0).toLocaleString();
-      } catch {}
-    } else {
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
       _hideStatus();
-      alert("Error: " + (data.detail || JSON.stringify(data)));
+      alert("Error: " + (data.detail || `Server returned ${r.status}`));
       document.getElementById("map-boundary-arcgis-count").textContent = arcgisCountText;
+      return;
     }
+    const data = await r.json();
+    let result = `Fetched ${data.fetched} parcels, imported ${data.imported} records.`;
+    if (data.assigned) result += ` ${data.assigned} assigned to "${data.event_name}".`;
+    document.getElementById("map-boundary-arcgis-count").textContent = `(${data.imported} imported)`;
+    _flashStatus(`Imported ${data.imported} parcels from ArcGIS.`);
   } catch (err) {
     _hideStatus();
-    alert("Network error: " + err.message);
+    alert("Import error: " + err.message);
     document.getElementById("map-boundary-arcgis-count").textContent = arcgisCountText;
+    return;
   }
+
+  // Refresh map and re-count independently — errors here should not mask import success
+  refreshMapDots();
+  try {
+    const cr = await authFetch(API + "/api/houses/in-polygon", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ polygon: _boundaryPoints, count_only: true }),
+    });
+    if (cr.ok) {
+      const cd = await cr.json();
+      document.getElementById("map-boundary-count").textContent = (cd.count || 0).toLocaleString();
+    }
+  } catch {}
 }
 
 async function boundaryAssignToEvent() {

@@ -93,7 +93,16 @@ def _send_code_email(email: str, code: str):
 # Auth dependency (used by other routes)
 # ---------------------------------------------------------------------------
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> str:
-    """Extract and validate session token. Returns the user's email."""
+    """Extract and validate session token. Returns the user's email.
+
+    The auth middleware already validates the token and caches the email
+    on request.state — use that to avoid a redundant DB query.
+    """
+    # Fast path: middleware already validated and stored the email
+    email = getattr(request.state, "user_email", None)
+    if email:
+        return email
+
     token = None
 
     # Check Authorization header
@@ -138,11 +147,22 @@ _RATE_LIMIT_WINDOW = 300  # 5 minutes
 _RATE_LIMIT_MAX = 10      # max attempts per window
 
 
+_rate_limit_last_cleanup = 0.0
+
+
 def _check_rate_limit(key: str):
     """Raise 429 if too many attempts for key within the window."""
     import time
+    global _rate_limit_last_cleanup
     now = time.time()
     window_start = now - _RATE_LIMIT_WINDOW
+
+    # Periodic cleanup: evict stale keys every 10 minutes
+    if now - _rate_limit_last_cleanup > 600:
+        stale = [k for k, v in _rate_limit_store.items() if not v or v[-1] < window_start]
+        for k in stale:
+            del _rate_limit_store[k]
+        _rate_limit_last_cleanup = now
 
     attempts = _rate_limit_store.get(key, [])
     attempts = [t for t in attempts if t > window_start]

@@ -394,16 +394,24 @@ def remove_event_houses(
     db: Session = Depends(get_db),
 ):
     """Remove specific houses from an event (unassign them)."""
+    if not body.event_house_ids:
+        return {"ok": True, "removed": 0}
+
+    CHUNK = 500
     deleted = 0
-    for ehid in body.event_house_ids:
-        eh = db.query(EventHouse).filter(
-            EventHouse.id == ehid,
-            EventHouse.event_id == event_id,
-        ).first()
-        if eh:
-            db.query(Visit).filter(Visit.event_house_id == eh.id).delete(synchronize_session=False)
-            db.delete(eh)
-            deleted += 1
+    for i in range(0, len(body.event_house_ids), CHUNK):
+        chunk = body.event_house_ids[i:i + CHUNK]
+        # Find matching event_houses in this event
+        eh_ids = [
+            row[0] for row in
+            db.query(EventHouse.id).filter(
+                EventHouse.id.in_(chunk),
+                EventHouse.event_id == event_id,
+            ).all()
+        ]
+        if eh_ids:
+            db.query(Visit).filter(Visit.event_house_id.in_(eh_ids)).delete(synchronize_session=False)
+            deleted += db.query(EventHouse).filter(EventHouse.id.in_(eh_ids)).delete(synchronize_session=False)
     db.commit()
     return {"ok": True, "removed": deleted}
 
