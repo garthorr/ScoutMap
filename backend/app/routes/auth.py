@@ -261,6 +261,8 @@ def logout(request: Request, db: Session = Depends(get_db)):
     if token:
         db.query(AuthSession).filter(AuthSession.token == token).delete()
         db.commit()
+        from app.main import invalidate_session_cache
+        invalidate_session_cache(token)
     return {"ok": True}
 
 

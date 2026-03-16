@@ -177,7 +177,7 @@ async def _fetch_all_pages(
             "inSR": "4326",
         }
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=120) as client:
         while len(all_features) < max_records:
             params = {
                 "where": where,
@@ -319,23 +319,42 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
     db.add(si)
     db.flush()
 
-    imported = 0
+    # --- Pre-load existing normalized addresses in bulk (avoids N per-row queries) ---
+    all_norms = set()
+    parsed_features = []
     for feat in features:
         attrs = feat.get("attributes", {})
-        geom = feat.get("geometry", {})
-
         full_addr = _compose_address(attrs)
         if not full_addr:
             continue
-
         norm = normalize_address(full_addr)
+        parsed_features.append((feat, full_addr, norm))
+        if norm:
+            all_norms.add(norm)
+
+    # Batch-load existing houses by normalized address (one query instead of N)
+    existing_map: dict[str, MasterHouse] = {}
+    norm_list = list(all_norms)
+    CHUNK = 500
+    for i in range(0, len(norm_list), CHUNK):
+        chunk = norm_list[i:i + CHUNK]
+        rows = db.query(MasterHouse).filter(MasterHouse.normalized_address.in_(chunk)).all()
+        for h in rows:
+            existing_map[h.normalized_address] = h
+
+    imported = 0
+    new_houses: list[MasterHouse] = []
+
+    for feat, full_addr, norm in parsed_features:
+        attrs = feat.get("attributes", {})
+        geom = feat.get("geometry", {})
+
         owner = str(attrs.get("TAXPANAME1") or "").strip() or None
         acct = str(attrs.get("ACCT") or attrs.get("GIS_ACCT") or "").strip() or None
         zip_code = _get_zip5(attrs)
         city = str(attrs.get("CITY") or "").strip() or "Dallas"
         legal = _get_legal(attrs)
         object_id = str(attrs.get("OBJECTID", uuid.uuid4()))
-
         lat, lon = _centroid(geom)
 
         if not norm:
@@ -349,10 +368,7 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
             imported += 1
             continue
 
-        existing = db.query(MasterHouse).filter(
-            MasterHouse.normalized_address == norm
-        ).first()
-
+        existing = existing_map.get(norm)
         if existing:
             house = existing
             if owner and not house.owner_name:
@@ -384,7 +400,8 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
                 legal_description=legal or None,
             )
             db.add(house)
-            db.flush()
+            new_houses.append(house)
+            existing_map[norm] = house  # dedup within batch
             match_method = "new"
 
         link = HouseSourceLink(
@@ -398,6 +415,15 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
         )
         db.add(link)
         imported += 1
+
+        # Flush in batches of 200 to keep memory stable (generates IDs for new houses)
+        if len(new_houses) >= 200:
+            db.flush()
+            new_houses.clear()
+
+    # Final flush for remaining new houses
+    if new_houses:
+        db.flush()
 
     si.record_count = imported
     si.status = "completed"
@@ -413,15 +439,18 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
             .all()
         ]
         if imported_house_ids:
-            already_assigned = set(
-                row[0] for row in
-                db.query(EventHouse.house_id)
-                .filter(
-                    EventHouse.event_id == event.id,
-                    EventHouse.house_id.in_(imported_house_ids),
+            already_assigned = set()
+            for i in range(0, len(imported_house_ids), CHUNK):
+                chunk = imported_house_ids[i:i + CHUNK]
+                already_assigned.update(
+                    row[0] for row in
+                    db.query(EventHouse.house_id)
+                    .filter(
+                        EventHouse.event_id == event.id,
+                        EventHouse.house_id.in_(chunk),
+                    )
+                    .all()
                 )
-                .all()
-            )
             for house_id in imported_house_ids:
                 if house_id not in already_assigned:
                     db.add(EventHouse(event_id=event.id, house_id=house_id))

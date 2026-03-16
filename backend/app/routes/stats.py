@@ -2,31 +2,43 @@
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import text
 
 from app.database import get_db
-from app.models import MasterHouse, FundraiserEvent, EventHouse, Visit, UnmatchedRecord, SourceImport, ScoutRoster
 from app.schemas import DashboardStats
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
 
+# Single SQL query that computes all dashboard counters in one DB round-trip.
+_STATS_SQL = text("""
+SELECT
+  (SELECT count(*) FROM master_houses)              AS total_houses,
+  (SELECT count(*) FROM fundraiser_events)          AS total_events,
+  (SELECT count(*) FROM visits)                     AS total_visits,
+  (SELECT coalesce(sum(donation_amount), 0) FROM visits) AS total_donations,
+  (SELECT count(*) FROM unmatched_records
+   WHERE status = 'pending')                        AS unmatched_count,
+  (SELECT count(*) FROM source_imports)             AS import_count,
+  (SELECT count(*) FROM scout_roster
+   WHERE active = true)                             AS total_scouts,
+  (SELECT count(*) FROM event_houses)               AS assigned_houses,
+  (SELECT count(DISTINCT event_house_id)
+   FROM visits)                                     AS houses_visited
+""")
+
+
 @router.get("/", response_model=DashboardStats)
 def dashboard(db: Session = Depends(get_db)):
+    row = db.execute(_STATS_SQL).one()
     return DashboardStats(
-        total_houses=db.query(func.count(MasterHouse.id)).scalar() or 0,
-        total_events=db.query(func.count(FundraiserEvent.id)).scalar() or 0,
-        total_visits=db.query(func.count(Visit.id)).scalar() or 0,
-        total_donations=db.query(func.coalesce(func.sum(Visit.donation_amount), 0)).scalar(),
-        unmatched_count=db.query(func.count(UnmatchedRecord.id)).filter(
-            UnmatchedRecord.status == "pending"
-        ).scalar() or 0,
-        import_count=db.query(func.count(SourceImport.id)).scalar() or 0,
-        total_scouts=db.query(func.count(ScoutRoster.id)).filter(
-            ScoutRoster.active == True
-        ).scalar() or 0,
-        assigned_houses=db.query(func.count(EventHouse.id)).scalar() or 0,
-        houses_visited=db.query(func.count(func.distinct(EventHouse.id))).join(
-            Visit, Visit.event_house_id == EventHouse.id
-        ).scalar() or 0,
+        total_houses=row.total_houses or 0,
+        total_events=row.total_events or 0,
+        total_visits=row.total_visits or 0,
+        total_donations=row.total_donations or 0,
+        unmatched_count=row.unmatched_count or 0,
+        import_count=row.import_count or 0,
+        total_scouts=row.total_scouts or 0,
+        assigned_houses=row.assigned_houses or 0,
+        houses_visited=row.houses_visited or 0,
     )

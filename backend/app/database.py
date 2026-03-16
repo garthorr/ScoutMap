@@ -3,7 +3,14 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from app.config import settings
 
-engine = create_engine(settings.database_url)
+# Tune pool for 1-CPU / 1-GB-RAM host: keep few connections, recycle often.
+engine = create_engine(
+    settings.database_url,
+    pool_size=3,
+    max_overflow=5,
+    pool_recycle=300,
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
