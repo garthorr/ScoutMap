@@ -23,30 +23,31 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # In-memory session token cache (avoids a DB query on every API request)
 # ---------------------------------------------------------------------------
-_SESSION_CACHE: dict[str, float] = {}  # token → expiry timestamp
+_SESSION_CACHE: dict[str, tuple[float, str]] = {}  # token → (expiry timestamp, email)
 _SESSION_CACHE_TTL = 120  # seconds before re-checking DB
 
 
-def _session_valid_cached(token: str) -> bool | None:
-    """Return True/False from cache, or None if cache miss / expired."""
+def _session_valid_cached(token: str) -> str | None:
+    """Return the user email from cache, or None if cache miss / expired."""
     entry = _SESSION_CACHE.get(token)
     if entry is None:
         return None
-    if time.time() > entry:
+    expiry, email = entry
+    if time.time() > expiry:
         _SESSION_CACHE.pop(token, None)
         return None  # cache entry expired, need to re-check
-    return True
+    return email
 
 
-def _cache_session(token: str, db_expires_at: datetime):
+def _cache_session(token: str, db_expires_at: datetime, email: str):
     """Cache a valid session.  Evict stale entries when cache grows."""
     # Use the shorter of DB session expiry and cache TTL
     cache_until = min(db_expires_at.timestamp(), time.time() + _SESSION_CACHE_TTL)
-    _SESSION_CACHE[token] = cache_until
+    _SESSION_CACHE[token] = (cache_until, email)
     # Lazy evict: if cache > 500 entries, drop expired ones
     if len(_SESSION_CACHE) > 500:
         now = time.time()
-        expired = [k for k, v in _SESSION_CACHE.items() if v < now]
+        expired = [k for k, (v, _e) in _SESSION_CACHE.items() if v < now]
         for k in expired:
             del _SESSION_CACHE[k]
 
@@ -121,6 +122,27 @@ def _seed_form_fields():
 
 _seed_form_fields()
 
+
+def _cleanup_expired_sessions():
+    """Remove expired sessions and auth codes from the database."""
+    from app.database import SessionLocal
+    from app.models import AuthCode
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        expired_sessions = db.query(AuthSession).filter(AuthSession.expires_at < now).delete(synchronize_session=False)
+        expired_codes = db.query(AuthCode).filter(AuthCode.expires_at < now).delete(synchronize_session=False)
+        if expired_sessions or expired_codes:
+            db.commit()
+            logger.info("Cleaned up %d expired sessions, %d expired auth codes", expired_sessions, expired_codes)
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+_cleanup_expired_sessions()
+
 app = FastAPI(title=settings.app_title)
 
 # Public paths that don't require authentication
@@ -156,8 +178,11 @@ async def auth_middleware(request: Request, call_next):
             return JSONResponse({"detail": "Not authenticated"}, status_code=401)
 
         # Fast-path: check in-memory cache first
-        cached = _session_valid_cached(token)
-        if cached is None:
+        cached_email = _session_valid_cached(token)
+        if cached_email is not None:
+            # Cache hit — store email so get_current_user skips a DB query
+            request.state.user_email = cached_email
+        else:
             # Cache miss — hit database
             from app.database import SessionLocal
             db = SessionLocal()
@@ -168,7 +193,8 @@ async def auth_middleware(request: Request, call_next):
                 ).first()
                 if not session:
                     return JSONResponse({"detail": "Session expired or invalid"}, status_code=401)
-                _cache_session(token, session.expires_at)
+                _cache_session(token, session.expires_at, session.email)
+                request.state.user_email = session.email
             finally:
                 db.close()
 

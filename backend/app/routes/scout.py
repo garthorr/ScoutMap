@@ -8,7 +8,7 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, case
 from typing import Optional
 
 from app.database import get_db
@@ -260,44 +260,51 @@ def scout_data_summary(
     event_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """Aggregate stats for scout data."""
+    """Aggregate stats for scout data using SQL GROUP BY."""
     q = (
-        db.query(Visit)
+        db.query(
+            func.coalesce(Visit.scout_name, "Unknown").label("scout_name"),
+            Visit.scout_id,
+            func.count(Visit.id).label("total_visits"),
+            func.count(case((Visit.door_answer == True, 1))).label("doors_answered_raw"),
+            func.count(case((Visit.donation_given == True, 1))).label("donations_raw"),
+            func.coalesce(
+                func.sum(case((Visit.donation_given == True, Visit.donation_amount), else_=0)),
+                0,
+            ).label("donation_total"),
+            func.count(case((Visit.former_scout == True, 1))).label("former_scouts_raw"),
+            func.count(case((Visit.avoid_house == True, 1))).label("avoid_houses_raw"),
+        )
         .join(EventHouse, Visit.event_house_id == EventHouse.id)
         .filter(Visit.scout_name.isnot(None))
     )
     if event_id:
         q = q.filter(EventHouse.event_id == event_id)
 
-    visits = q.all()
-    scouts = {}
-    for v in visits:
-        key = v.scout_name or "Unknown"
-        if key not in scouts:
-            scouts[key] = {
-                "scout_name": key,
-                "scout_id": v.scout_id,
-                "total_visits": 0,
-                "doors_answered": 0,
-                "donations": 0,
-                "donation_total": 0.0,
-                "former_scouts": 0,
-                "avoid_houses": 0,
-            }
-        s = scouts[key]
-        s["total_visits"] += 1
-        if v.door_answer:
-            s["doors_answered"] += 1
-        if v.donation_given:
-            s["donations"] += 1
-            s["donation_total"] += v.donation_amount or 0
-        if v.former_scout:
-            s["former_scouts"] += 1
-        if v.avoid_house:
-            s["avoid_houses"] += 1
+    rows = q.group_by(func.coalesce(Visit.scout_name, "Unknown"), Visit.scout_id).all()
+
+    scouts = []
+    total_visits = 0
+    total_donations = 0.0
+    for r in rows:
+        total_visits += r.total_visits
+        donation_total = float(r.donation_total or 0)
+        total_donations += donation_total
+        scouts.append({
+            "scout_name": r.scout_name,
+            "scout_id": r.scout_id,
+            "total_visits": r.total_visits,
+            "doors_answered": int(r.doors_answered_raw or 0),
+            "donations": int(r.donations_raw or 0),
+            "donation_total": donation_total,
+            "former_scouts": int(r.former_scouts_raw or 0),
+            "avoid_houses": int(r.avoid_houses_raw or 0),
+        })
+
+    scouts.sort(key=lambda s: s["total_visits"], reverse=True)
 
     return {
-        "total_visits": len(visits),
-        "total_donations": sum(v.donation_amount or 0 for v in visits if v.donation_given),
-        "scouts": sorted(scouts.values(), key=lambda s: s["total_visits"], reverse=True),
+        "total_visits": total_visits,
+        "total_donations": total_donations,
+        "scouts": scouts,
     }
