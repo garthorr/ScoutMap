@@ -34,7 +34,7 @@ def list_houses(
     return q.order_by(MasterHouse.normalized_address).offset(offset).limit(limit).all()
 
 
-@router.get("/map", response_model=list[MasterHouseOut])
+@router.get("/map")
 def houses_for_map(
     min_lat: float = Query(...),
     min_lon: float = Query(...),
@@ -43,8 +43,16 @@ def houses_for_map(
     limit: int = Query(500, le=5000),
     db: Session = Depends(get_db),
 ):
-    return (
-        db.query(MasterHouse)
+    """Return houses for the map popup view — only the columns the frontend needs."""
+    rows = (
+        db.query(
+            MasterHouse.id,
+            MasterHouse.latitude,
+            MasterHouse.longitude,
+            MasterHouse.full_address,
+            MasterHouse.owner_name,
+            MasterHouse.total_appraised_value,
+        )
         .filter(
             MasterHouse.latitude.isnot(None),
             MasterHouse.longitude.isnot(None),
@@ -54,6 +62,17 @@ def houses_for_map(
         .limit(limit)
         .all()
     )
+    return [
+        {
+            "id": str(r.id),
+            "latitude": r.latitude,
+            "longitude": r.longitude,
+            "full_address": r.full_address,
+            "owner_name": r.owner_name,
+            "total_appraised_value": r.total_appraised_value,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/map/dots")
@@ -298,10 +317,33 @@ class BatchDeleteBody(BaseModel):
 
 @router.post("/batch-delete")
 def batch_delete_houses(body: BatchDeleteBody, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
-    """Delete multiple houses at once (used by map erase tool)."""
+    """Delete multiple houses at once (used by map erase tool).
+
+    Uses bulk SQL deletes in chunks instead of per-house loops.
+    """
+    if not body.house_ids:
+        return {"ok": True, "deleted": 0}
+
+    all_ids = body.house_ids
+    CHUNK = 500
     deleted = 0
-    for hid in body.house_ids:
-        if _delete_house(hid, db):
-            deleted += 1
+
+    for i in range(0, len(all_ids), CHUNK):
+        chunk = all_ids[i:i + CHUNK]
+
+        # Find event_house IDs for these houses
+        eh_ids = [
+            row[0] for row in
+            db.query(EventHouse.id).filter(EventHouse.house_id.in_(chunk)).all()
+        ]
+        if eh_ids:
+            db.query(Visit).filter(Visit.event_house_id.in_(eh_ids)).delete(synchronize_session=False)
+        db.query(EventHouse).filter(EventHouse.house_id.in_(chunk)).delete(synchronize_session=False)
+        db.query(HouseSourceLink).filter(HouseSourceLink.house_id.in_(chunk)).delete(synchronize_session=False)
+        db.query(UnmatchedRecord).filter(UnmatchedRecord.resolved_house_id.in_(chunk)).update(
+            {"resolved_house_id": None, "status": "pending"}, synchronize_session=False
+        )
+        deleted += db.query(MasterHouse).filter(MasterHouse.id.in_(chunk)).delete(synchronize_session=False)
+
     db.commit()
     return {"ok": True, "deleted": deleted}

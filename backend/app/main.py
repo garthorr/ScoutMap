@@ -1,6 +1,8 @@
 """FastAPI application entry point."""
 
 import logging
+import time
+from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -17,6 +19,41 @@ from app.models import AllowedEmail, AuthSession
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# In-memory session token cache (avoids a DB query on every API request)
+# ---------------------------------------------------------------------------
+_SESSION_CACHE: dict[str, float] = {}  # token → expiry timestamp
+_SESSION_CACHE_TTL = 120  # seconds before re-checking DB
+
+
+def _session_valid_cached(token: str) -> bool | None:
+    """Return True/False from cache, or None if cache miss / expired."""
+    entry = _SESSION_CACHE.get(token)
+    if entry is None:
+        return None
+    if time.time() > entry:
+        _SESSION_CACHE.pop(token, None)
+        return None  # cache entry expired, need to re-check
+    return True
+
+
+def _cache_session(token: str, db_expires_at: datetime):
+    """Cache a valid session.  Evict stale entries when cache grows."""
+    # Use the shorter of DB session expiry and cache TTL
+    cache_until = min(db_expires_at.timestamp(), time.time() + _SESSION_CACHE_TTL)
+    _SESSION_CACHE[token] = cache_until
+    # Lazy evict: if cache > 500 entries, drop expired ones
+    if len(_SESSION_CACHE) > 500:
+        now = time.time()
+        expired = [k for k, v in _SESSION_CACHE.items() if v < now]
+        for k in expired:
+            del _SESSION_CACHE[k]
+
+
+def invalidate_session_cache(token: str):
+    """Call on logout to immediately remove a token from cache."""
+    _SESSION_CACHE.pop(token, None)
 
 # Create all tables on startup (handles NEW tables, but not new columns)
 Base.metadata.create_all(bind=engine)
@@ -118,19 +155,22 @@ async def auth_middleware(request: Request, call_next):
         if not token:
             return JSONResponse({"detail": "Not authenticated"}, status_code=401)
 
-        # Validate session
-        from datetime import datetime
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            session = db.query(AuthSession).filter(
-                AuthSession.token == token,
-                AuthSession.expires_at > datetime.utcnow(),
-            ).first()
-            if not session:
-                return JSONResponse({"detail": "Session expired or invalid"}, status_code=401)
-        finally:
-            db.close()
+        # Fast-path: check in-memory cache first
+        cached = _session_valid_cached(token)
+        if cached is None:
+            # Cache miss — hit database
+            from app.database import SessionLocal
+            db = SessionLocal()
+            try:
+                session = db.query(AuthSession).filter(
+                    AuthSession.token == token,
+                    AuthSession.expires_at > datetime.utcnow(),
+                ).first()
+                if not session:
+                    return JSONResponse({"detail": "Session expired or invalid"}, status_code=401)
+                _cache_session(token, session.expires_at)
+            finally:
+                db.close()
 
     return await call_next(request)
 
