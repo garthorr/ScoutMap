@@ -350,18 +350,27 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
 
     imported = 0
     new_houses: list[MasterHouse] = []
+    seen_object_ids: set[str] = set()  # deduplicate features from overlapping pages
 
     for feat, full_addr, norm in parsed_features:
         attrs = feat.get("attributes", {})
         geom = feat.get("geometry", {})
 
-        owner = str(attrs.get("TAXPANAME1") or "").strip() or None
-        acct = str(attrs.get("ACCT") or attrs.get("GIS_ACCT") or "").strip() or None
-        zip_code = _get_zip5(attrs)
-        city = str(attrs.get("CITY") or "").strip() or "Dallas"
-        legal = _get_legal(attrs)
         object_id = str(attrs.get("OBJECTID", uuid.uuid4()))
-        lat, lon = _centroid(geom)
+        if object_id in seen_object_ids:
+            continue  # skip duplicates from ArcGIS pagination overlap
+        seen_object_ids.add(object_id)
+
+        try:
+            owner = str(attrs.get("TAXPANAME1") or "").strip() or None
+            acct = str(attrs.get("ACCT") or attrs.get("GIS_ACCT") or "").strip() or None
+            zip_code = _get_zip5(attrs)
+            city = str(attrs.get("CITY") or "").strip() or "Dallas"
+            legal = _get_legal(attrs)
+            lat, lon = _centroid(geom)
+        except Exception as exc:
+            logger.warning("Skipping feature %s: %s", object_id, exc)
+            continue
 
         if not norm:
             db.add(UnmatchedRecord(
@@ -462,7 +471,12 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
                     db.add(EventHouse(event_id=event.id, house_id=house_id))
                     assigned += 1
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.error("ArcGIS import commit failed: %s", exc)
+        raise HTTPException(500, f"Database error while saving imported parcels: {type(exc).__name__}")
 
     return {
         "status": "ok",
