@@ -16,6 +16,9 @@ from app.routes.auth import require_admin
 
 router = APIRouter(prefix="/api/houses", tags=["houses"])
 
+# Only show residential single-family and duplex properties
+RESIDENTIAL_TYPES = ("SINGLE FAMILY RESIDENCES", "DUPLEX")
+
 
 @router.get("/", response_model=list[MasterHouseOut])
 def list_houses(
@@ -61,6 +64,7 @@ def houses_for_map(
             MasterHouse.longitude.isnot(None),
             MasterHouse.latitude.between(min_lat, max_lat),
             MasterHouse.longitude.between(min_lon, max_lon),
+            MasterHouse.property_type.in_(RESIDENTIAL_TYPES),
         )
         .limit(limit)
         .all()
@@ -95,6 +99,7 @@ def houses_dots_fast(
             MasterHouse.longitude.isnot(None),
             MasterHouse.latitude.between(min_lat, max_lat),
             MasterHouse.longitude.between(min_lon, max_lon),
+            MasterHouse.property_type.in_(RESIDENTIAL_TYPES),
         )
         .limit(limit)
         .all()
@@ -198,6 +203,7 @@ def houses_in_polygon(body: PolygonQueryRequest, _admin: str = Depends(require_a
             MasterHouse.longitude.isnot(None),
             MasterHouse.latitude.between(min_lat, max_lat),
             MasterHouse.longitude.between(min_lng, max_lng),
+            MasterHouse.property_type.in_(RESIDENTIAL_TYPES),
         )
         .all()
     )
