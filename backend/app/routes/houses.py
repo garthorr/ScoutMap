@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/houses", tags=["houses"])
 def list_houses(
     search: str = Query(None),
     zip_code: str = Query(None),
+    property_type: str = Query(None),
     limit: int = Query(100, le=500),
     offset: int = Query(0),
     db: Session = Depends(get_db),
@@ -31,6 +32,8 @@ def list_houses(
         q = q.filter(MasterHouse.normalized_address.ilike(pattern))
     if zip_code:
         q = q.filter(MasterHouse.zip_code == zip_code)
+    if property_type:
+        q = q.filter(MasterHouse.property_type == property_type)
     return q.order_by(MasterHouse.normalized_address).offset(offset).limit(limit).all()
 
 

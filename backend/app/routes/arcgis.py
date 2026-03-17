@@ -78,6 +78,10 @@ def _build_where(req: ArcGISFetchRequest) -> str:
             clauses.append(parts[0])
         elif parts:
             clauses.append("(" + " OR ".join(parts) + ")")
+
+    # Only import single-family and duplex residential properties
+    clauses.append("PROP_CL IN ('SINGLE FAMILY RESIDENCES', 'DUPLEX')")
+
     return " AND ".join(clauses) if clauses else "1=1"
 
 
@@ -399,6 +403,8 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
             imported += 1
             continue
 
+        prop_cl = str(attrs.get("PROP_CL") or "").strip() or None
+
         existing = existing_map.get(norm)
         if existing:
             house = existing
@@ -412,6 +418,8 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
                 house.longitude = float(lon)
             if legal and not house.legal_description:
                 house.legal_description = legal
+            if prop_cl and not house.property_type:
+                house.property_type = prop_cl
             match_method = "exact"
         else:
             parts = parse_address_parts(full_addr)
@@ -430,6 +438,7 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
                 owner_name=owner,
                 account_number=acct,
                 legal_description=legal or None,
+                property_type=prop_cl,
             )
             db.add(house)
             new_houses.append(house)

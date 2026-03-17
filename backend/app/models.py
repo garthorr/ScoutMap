@@ -65,6 +65,9 @@ class MasterHouse(Base):
     improvement_value = Column(Float)
     total_appraised_value = Column(Float)
 
+    # Property classification (e.g. "SINGLE FAMILY RESIDENCES", "DUPLEX")
+    property_type = Column(String(100))
+
     # Manual entry flag
     manually_created = Column(Boolean, default=False)
 

@@ -48,6 +48,7 @@ class MasterHouseOut(BaseModel):
     parcel_id: Optional[str] = None
     account_number: Optional[str] = None
     total_appraised_value: Optional[float] = None
+    property_type: Optional[str] = None
     manually_created: bool = False
     created_at: datetime
 
