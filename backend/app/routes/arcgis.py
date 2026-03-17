@@ -303,7 +303,13 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
             "xmax": req.bbox_xmax, "ymax": req.bbox_ymax,
         }
 
-    features = await _fetch_all_pages(where, bbox, req.max_records, polygon=req.polygon)
+    try:
+        features = await _fetch_all_pages(where, bbox, req.max_records, polygon=req.polygon)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("ArcGIS fetch failed: %s", exc)
+        raise HTTPException(502, f"Failed to connect to ArcGIS service: {type(exc).__name__}")
     if not features:
         return {"status": "ok", "fetched": 0, "imported": 0, "assigned": 0, "message": "No parcels found for that query."}
 
