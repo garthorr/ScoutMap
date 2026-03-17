@@ -327,7 +327,12 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
         notes=req.notes or f"ArcGIS fetch: {where}",
     )
     db.add(si)
-    db.flush()
+    try:
+        db.flush()
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to create SourceImport: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Database error creating import record: {type(exc).__name__}: {exc}")
 
     # --- Pre-load existing normalized addresses in bulk (avoids N per-row queries) ---
     all_norms = set()
@@ -346,13 +351,19 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
     existing_map: dict[str, MasterHouse] = {}
     norm_list = list(all_norms)
     CHUNK = 500
-    for i in range(0, len(norm_list), CHUNK):
-        chunk = norm_list[i:i + CHUNK]
-        rows = db.query(MasterHouse).filter(MasterHouse.normalized_address.in_(chunk)).all()
-        for h in rows:
-            existing_map[h.normalized_address] = h
+    try:
+        for i in range(0, len(norm_list), CHUNK):
+            chunk = norm_list[i:i + CHUNK]
+            rows = db.query(MasterHouse).filter(MasterHouse.normalized_address.in_(chunk)).all()
+            for h in rows:
+                existing_map[h.normalized_address] = h
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to pre-load existing houses: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Database error loading existing houses: {type(exc).__name__}: {exc}")
 
     imported = 0
+    skipped = 0
     new_houses: list[MasterHouse] = []
     seen_object_ids: set[str] = set()  # deduplicate features from overlapping pages
 
@@ -374,6 +385,7 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
             lat, lon = _centroid(geom)
         except Exception as exc:
             logger.warning("Skipping feature %s: %s", object_id, exc)
+            skipped += 1
             continue
 
         if not norm:
@@ -437,12 +449,22 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
 
         # Flush in batches of 200 to keep memory stable (generates IDs for new houses)
         if len(new_houses) >= 200:
-            db.flush()
+            try:
+                db.flush()
+            except Exception as exc:
+                db.rollback()
+                logger.error("Batch flush failed at %d houses: %s", imported, exc, exc_info=True)
+                raise HTTPException(500, f"Database error at record {imported}: {type(exc).__name__}: {exc}")
             new_houses.clear()
 
     # Final flush for remaining new houses
     if new_houses:
-        db.flush()
+        try:
+            db.flush()
+        except Exception as exc:
+            db.rollback()
+            logger.error("Final flush failed at %d houses: %s", imported, exc, exc_info=True)
+            raise HTTPException(500, f"Database error at final flush: {type(exc).__name__}: {exc}")
 
     si.record_count = imported
     si.status = "completed"
@@ -451,12 +473,13 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
     # Auto-assign imported houses to event if event_id was provided
     assigned = 0
     if event:
-        imported_house_ids = [
+        # Use a set to deduplicate — multiple parcels can map to the same house
+        imported_house_ids = list({
             row[0] for row in
             db.query(HouseSourceLink.house_id)
             .filter(HouseSourceLink.source_import_id == si.id)
             .all()
-        ]
+        })
         if imported_house_ids:
             already_assigned = set()
             for i in range(0, len(imported_house_ids), CHUNK):
@@ -479,8 +502,11 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
         db.commit()
     except Exception as exc:
         db.rollback()
-        logger.error("ArcGIS import commit failed: %s", exc)
-        raise HTTPException(500, f"Database error while saving imported parcels: {type(exc).__name__}")
+        logger.error("ArcGIS import commit failed: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Database error while saving imported parcels: {type(exc).__name__}: {exc}")
+
+    logger.info("ArcGIS import complete: fetched=%d imported=%d skipped=%d assigned=%d",
+                len(features), imported, skipped, assigned)
 
     return {
         "status": "ok",
