@@ -16,11 +16,15 @@ from app.routes.auth import require_admin
 
 router = APIRouter(prefix="/api/houses", tags=["houses"])
 
+# Only show residential single-family and duplex properties
+RESIDENTIAL_TYPES = ("SINGLE FAMILY RESIDENCES", "DUPLEX")
+
 
 @router.get("/", response_model=list[MasterHouseOut])
 def list_houses(
     search: str = Query(None),
     zip_code: str = Query(None),
+    property_type: str = Query(None),
     limit: int = Query(100, le=500),
     offset: int = Query(0),
     db: Session = Depends(get_db),
@@ -31,6 +35,8 @@ def list_houses(
         q = q.filter(MasterHouse.normalized_address.ilike(pattern))
     if zip_code:
         q = q.filter(MasterHouse.zip_code == zip_code)
+    if property_type:
+        q = q.filter(MasterHouse.property_type == property_type)
     return q.order_by(MasterHouse.normalized_address).offset(offset).limit(limit).all()
 
 
@@ -58,6 +64,7 @@ def houses_for_map(
             MasterHouse.longitude.isnot(None),
             MasterHouse.latitude.between(min_lat, max_lat),
             MasterHouse.longitude.between(min_lon, max_lon),
+            MasterHouse.property_type.in_(RESIDENTIAL_TYPES),
         )
         .limit(limit)
         .all()
@@ -92,6 +99,7 @@ def houses_dots_fast(
             MasterHouse.longitude.isnot(None),
             MasterHouse.latitude.between(min_lat, max_lat),
             MasterHouse.longitude.between(min_lon, max_lon),
+            MasterHouse.property_type.in_(RESIDENTIAL_TYPES),
         )
         .limit(limit)
         .all()
@@ -195,6 +203,7 @@ def houses_in_polygon(body: PolygonQueryRequest, _admin: str = Depends(require_a
             MasterHouse.longitude.isnot(None),
             MasterHouse.latitude.between(min_lat, max_lat),
             MasterHouse.longitude.between(min_lng, max_lng),
+            MasterHouse.property_type.in_(RESIDENTIAL_TYPES),
         )
         .all()
     )

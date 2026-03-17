@@ -68,6 +68,7 @@ def import_dcad(db: Session, file_path: str, source_import_id: str) -> int:
         land_val = _float_or_none(_get(row, "LAND_VALUE"))
         impr_val = _float_or_none(_get(row, "IMPR_VALUE", "IMPROVEMENT_VALUE"))
         total_val = _float_or_none(_get(row, "TOTAL_VALUE", "MARKET_VALUE", "APPRAISED_VALUE"))
+        prop_type = _get(row, "PROP_CL", "PROP_TYPE", "PROPERTY_TYPE", "STATE_CD")
         source_id = account or parcel or str(uuid.uuid4())
 
         # Try exact normalized match first
@@ -93,6 +94,8 @@ def import_dcad(db: Session, file_path: str, source_import_id: str) -> int:
                 house.improvement_value = impr_val
             if total_val is not None:
                 house.total_appraised_value = total_val
+            if prop_type and not house.property_type:
+                house.property_type = prop_type
         elif norm:
             parts = parse_address_parts(full_addr)
             house = MasterHouse(
@@ -110,6 +113,7 @@ def import_dcad(db: Session, file_path: str, source_import_id: str) -> int:
                 land_value=land_val,
                 improvement_value=impr_val,
                 total_appraised_value=total_val,
+                property_type=prop_type or None,
             )
             db.add(house)
             db.flush()
