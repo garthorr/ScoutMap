@@ -1342,6 +1342,57 @@ async function boundaryAssignToEvent() {
   }
 }
 
+async function boundaryDeleteHouses() {
+  if (!_boundaryPoints.length || !_boundaryClosed) return;
+  const countText = document.getElementById("map-boundary-count").textContent;
+  if (!confirm(`Delete ALL ${countText} houses within this boundary? This cannot be undone.`)) return;
+
+  document.getElementById("map-boundary-count").textContent = "finding houses…";
+  _showStatus("Deleting houses in boundary…");
+  try {
+    // Get house IDs inside the polygon
+    const r = await authFetch(API + "/api/houses/in-polygon", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ polygon: _boundaryPoints }),
+    });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      throw new Error(data.detail || `Server returned ${r.status}`);
+    }
+    const data = await r.json();
+    const ids = data.house_ids || [];
+    if (!ids.length) {
+      _hideStatus();
+      alert("No houses found in this boundary.");
+      document.getElementById("map-boundary-count").textContent = "0";
+      return;
+    }
+
+    document.getElementById("map-boundary-count").textContent = `deleting ${ids.length}…`;
+
+    // Batch delete
+    const dr = await authFetch(API + "/api/houses/batch-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ house_ids: ids }),
+    });
+    if (dr.ok) {
+      const dd = await dr.json();
+      _flashStatus(`Deleted ${dd.deleted} house(s) from boundary.`);
+      document.getElementById("map-boundary-count").textContent = "0";
+      refreshMapDots();
+    } else {
+      const dd = await dr.json().catch(() => ({}));
+      throw new Error(dd.detail || "Error deleting houses.");
+    }
+  } catch (err) {
+    _hideStatus();
+    alert("Delete error: " + err.message);
+    document.getElementById("map-boundary-count").textContent = countText;
+  }
+}
+
 function _showBoundaryHouses(houseIds) {
   // We already have the polygon on the map; no need to re-highlight
   // but we update the count to reflect assigned count
