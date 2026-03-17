@@ -128,16 +128,13 @@
             </select>
             <span class="tooltip">Select one or more imported ZIP codes to load on the map</span>
           </span>
-          <button onclick="loadMapStreets()">Load Streets</button>
           <span class="tooltip-wrap">
             <select id="map-event-select" style="min-width:160px;">
               <option value="">Walk Groups: none</option>
             </select>
             <span class="tooltip">Show walk group routes on the map</span>
           </span>
-          <span id="map-street-count" style="font-size:13px;color:var(--sa-gray);"></span>
         </div>
-        <div id="map-selected-streets" style="margin-top:8px;font-size:13px;color:var(--sa-dark-blue);display:none;"></div>
       </div>
       <div id="map-toolbar" style="margin-bottom:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
         <button id="map-tool-pointer" class="btn-sm map-tool active" onclick="setMapTool('pointer')" title="Pan / select">Pointer</button>
@@ -178,19 +175,8 @@
         <div id="map" style="height:550px;border-radius:8px;"></div>
         <div id="map-loading"><div class="loading-pill"><span class="loading-spinner"></span><span id="map-loading-text">Loading houses…</span></div></div>
       </div>
-      <div id="map-street-list" class="card" style="margin-top:12px;display:none;">
-        <h3>Streets <span id="map-street-filter-count" style="font-weight:400;color:var(--sa-gray);font-size:13px;"></span></h3>
-        <div style="margin-bottom:8px;">
-          <input id="map-street-search" placeholder="Filter streets…" style="padding:6px 10px;border:1px solid #c5c5c5;border-radius:6px;font-size:13px;width:240px;" oninput="renderStreetCheckboxes()" />
-          <button class="btn-sm" onclick="selectAllVisibleStreets()" style="margin-left:6px;">Select All Visible</button>
-          <button class="btn-sm" onclick="clearStreetSelection()" style="margin-left:4px;">Clear</button>
-        </div>
-        <div id="map-streets" style="max-height:260px;overflow-y:auto;column-count:3;column-gap:16px;"></div>
-        <div style="margin-top:10px;border-top:1px solid #e8e8e4;padding-top:10px;">
-          <span id="map-selection-summary" style="font-size:13px;color:var(--sa-gray);"></span>
-          <button class="btn-sm" onclick="copySelectedStreets()" style="margin-left:8px;">Copy to Walk Groups</button>
-        </div>
-      </div>
+
+
     </section>
 
     <!-- Events -->
@@ -233,7 +219,7 @@
             <span class="tooltip">Filter by street name, e.g. Elm St, Main St</span>
           </span>
           <span class="tooltip-wrap">
-            <input name="limit" type="number" placeholder="Limit" />
+            <input name="limit" type="number" value="250" min="1" />
             <span class="tooltip">Max number of houses to assign</span>
           </span>
           <span class="tooltip-wrap">
