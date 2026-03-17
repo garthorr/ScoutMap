@@ -41,7 +41,7 @@ OUT_FIELDS = ",".join([
     "OBJECTID", "ST_NUM", "ST_NAME", "ST_TYPE", "ST_DIR", "UNITID",
     "TAXPANAME1", "ACCT", "GIS_ACCT",
     "TAXPAZIP", "CITY", "COUNTY",
-    "LEGAL_1", "LEGAL_2", "LEGAL_3",
+    "LEGAL_1", "LEGAL_2", "LEGAL_3", "LEGAL_4", "LEGAL_5",
     "PROP_CL", "ResCom",
 ])
 
@@ -146,7 +146,7 @@ def _float_or_none(val) -> Optional[float]:
         return None
 
 
-async def _fetch_all_pages(
+def _fetch_all_pages(
     where: str,
     bbox: Optional[dict],
     max_records: int,
@@ -177,7 +177,7 @@ async def _fetch_all_pages(
             "inSR": "4326",
         }
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    with httpx.Client(timeout=120) as client:
         while len(all_features) < max_records:
             params = {
                 "where": where,
@@ -191,7 +191,7 @@ async def _fetch_all_pages(
             }
 
             logger.info("ArcGIS query: where=%s offset=%s limit=%s", where, offset, page_size)
-            resp = await client.get(ARCGIS_QUERY, params=params)
+            resp = client.get(ARCGIS_QUERY, params=params)
 
             if resp.status_code != 200:
                 logger.error("ArcGIS HTTP %s: %s", resp.status_code, resp.text[:500])
@@ -218,11 +218,11 @@ async def _fetch_all_pages(
 # ---------------------------------------------------------------------------
 
 @router.get("/test")
-async def test_arcgis_connection():
+def test_arcgis_connection():
     """Diagnostic: fetch 1 record from ArcGIS and return the raw response."""
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(ARCGIS_QUERY, params={
+        with httpx.Client(timeout=30) as client:
+            resp = client.get(ARCGIS_QUERY, params={
                 "where": "1=1",
                 "outFields": "*",
                 "returnGeometry": "true",
@@ -258,7 +258,7 @@ class ArcGISCountRequest(BaseModel):
 
 
 @router.post("/count")
-async def count_arcgis_parcels(req: ArcGISCountRequest, _admin: str = Depends(require_admin)):
+def count_arcgis_parcels(req: ArcGISCountRequest, _admin: str = Depends(require_admin)):
     """Query ArcGIS to get the record count for given ZIP codes or polygon without fetching data."""
     where_req = ArcGISFetchRequest(zip_codes=req.zip_codes)
     where = _build_where(where_req)
@@ -275,8 +275,8 @@ async def count_arcgis_parcels(req: ArcGISCountRequest, _admin: str = Depends(re
         params["spatialRel"] = "esriSpatialRelContains"
         params["inSR"] = "4326"
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(ARCGIS_QUERY, params=params)
+        with httpx.Client(timeout=30) as client:
+            resp = client.get(ARCGIS_QUERY, params=params)
             data = resp.json()
             if "error" in data:
                 return {"count": None, "error": data["error"].get("message", str(data["error"]))}
@@ -286,11 +286,15 @@ async def count_arcgis_parcels(req: ArcGISCountRequest, _admin: str = Depends(re
 
 
 @router.post("/fetch")
-async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
+def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Fetch tax parcels from Dallas ArcGIS and import into the database."""
     # Validate event_id if provided
     event = None
     if req.event_id:
+        try:
+            uuid.UUID(req.event_id)
+        except (ValueError, AttributeError):
+            raise HTTPException(400, f"Invalid event_id format: {req.event_id}")
         event = db.query(FundraiserEvent).filter(FundraiserEvent.id == req.event_id).first()
         if not event:
             raise HTTPException(400, f"Event not found: {req.event_id}")
@@ -304,7 +308,7 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
         }
 
     try:
-        features = await _fetch_all_pages(where, bbox, req.max_records, polygon=req.polygon)
+        features = _fetch_all_pages(where, bbox, req.max_records, polygon=req.polygon)
     except HTTPException:
         raise
     except Exception as exc:
@@ -450,7 +454,7 @@ async def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(re
         imported_house_ids = [
             row[0] for row in
             db.query(HouseSourceLink.house_id)
-            .filter(HouseSourceLink.source_import_id == str(si.id))
+            .filter(HouseSourceLink.source_import_id == si.id)
             .all()
         ]
         if imported_house_ids:
