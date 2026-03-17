@@ -416,6 +416,7 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
         else:
             parts = parse_address_parts(full_addr)
             house = MasterHouse(
+                id=uuid.uuid4(),
                 full_address=full_addr,
                 normalized_address=norm,
                 address_number=parts["address_number"],
