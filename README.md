@@ -1,6 +1,6 @@
 # ScoutMap
 
-A door-to-door fundraising management application that uses **public data as the primary source** for address/house records, minimizing manual data entry. Built for neighborhood fundraising campaigns in Dallas, TX.
+A door-to-door fundraising management application that uses **public data as the primary source** for address/house records, minimizing manual data entry. Built for neighborhood fundraising campaigns in Dallas, TX. Branded with **Scouting America** identity.
 
 ## Architecture
 
@@ -79,7 +79,7 @@ The admin interface for troop leaders:
 | **Dashboard** | — | Aggregate stats, phase progress, quick links |
 | **Events** | Prepare | Create events, assign houses |
 | **Import Data** | Prepare | ArcGIS fetch, file upload, import history, unmatched records |
-| **Map** | Prepare | Interactive map with tools: pointer, box select, erase, add house, polygon boundary |
+| **Map** | Prepare | Interactive map with tools: pointer, box select, add house, polygon boundary |
 | **Scouts** | Prepare | Manage roster, import/export CSV, set passwords |
 | **Houses** | Organize | Search and manage master house list |
 | **Walk Groups** | Organize | Auto-generate walkable groups by street |
@@ -112,6 +112,7 @@ A mobile/tablet-optimized field entry app:
 - Click to draw a polygon following streets/alleys
 - Shows both local house count and ArcGIS parcel count for the boundary
 - Click **Import from ArcGIS** to fetch all parcels within the polygon — no ZIP code needed
+- Delete boundary houses directly from the boundary panel
 - Optionally assign to an event and group label in one step
 
 **3. File Upload**
@@ -140,6 +141,7 @@ Each import method runs the same pipeline:
 **ArcGIS Tax Parcels (via API)**
 - Fields: `ST_NUM`, `ST_NAME`, `ST_TYPE`, `ST_DIR`, `TAXPANAME1`, `ACCT`, `TAXPAZIP`
 - Supports ZIP code filter, bounding box, and polygon geometry queries
+- Automatically filtered to residential property types (single family residences and duplexes)
 
 ### Cross-Source Enrichment
 
@@ -153,13 +155,10 @@ When multiple sources cover the same address, records are matched by normalized 
 The interactive map (Leaflet) includes:
 
 - **Zoom-based loading** — lightweight dots at low zoom (fast rendering of thousands of houses), full detail with popups at high zoom
-- **ZIP code multi-select** — dropdown of all imported ZIP codes, load streets from multiple ZIPs at once
-- **Polygon boundary tool** — draw boundaries, count houses, import from ArcGIS, assign to events
-- **Box select** — drag to select houses, assign to events or batch delete
-- **Erase tool** — click houses to mark for removal, confirm batch delete
+- **Polygon boundary tool** — draw boundaries, count houses, import from ArcGIS, assign to events, delete
+- **Box select** — drag to select houses, assign to events or delete selected
 - **Add tool** — click map to place a new house manually
 - **Walk group overlay** — select event to see color-coded walk routes
-- **Street selection** — load streets by ZIP, check/uncheck individual streets
 
 Touch/tablet support: all tools work with touch events, minimum 44px tap targets.
 
