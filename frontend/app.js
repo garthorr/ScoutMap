@@ -638,10 +638,37 @@ async function mergeSelectedGroups(eventId) {
 
 /**
  * Compute a midline trace for a sorted list of house points.
- * Each item needs {lat, lon, address_number|num} (supports both formats).
  * Groups by even/odd address numbers (opposite sides of street),
  * then averages positions pairwise to trace down the center.
  */
+function _computeMidline(streetHouses) {
+  const evens = [];
+  const odds = [];
+  streetHouses.forEach(eh => {
+    const num = parseInt(eh.house.address_number) || 0;
+    const pt = [eh.house.latitude, eh.house.longitude];
+    if (num % 2 === 0) evens.push(pt);
+    else odds.push(pt);
+  });
+
+  // If all on one side, just return those points as the line
+  if (!evens.length) return odds;
+  if (!odds.length) return evens;
+
+  // Average pairwise between even and odd sides
+  const longer = evens.length >= odds.length ? evens : odds;
+  const shorter = evens.length >= odds.length ? odds : evens;
+  const midCoords = [];
+  for (let i = 0; i < longer.length; i++) {
+    // Map index into shorter array proportionally
+    const j = Math.min(Math.floor(i * shorter.length / longer.length), shorter.length - 1);
+    midCoords.push([
+      (longer[i][0] + shorter[j][0]) / 2,
+      (longer[i][1] + shorter[j][1]) / 2,
+    ]);
+  }
+  return midCoords;
+}
 // --- ZIP code multi-select for map ---
 async function _loadMapZipSelect() {
   const sel = document.getElementById("map-zip-select");
