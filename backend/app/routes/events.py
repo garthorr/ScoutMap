@@ -10,7 +10,7 @@ from sqlalchemy import func, or_
 from typing import Optional
 
 from app.database import get_db
-from app.models import FundraiserEvent, EventHouse, MasterHouse, Visit
+from app.models import FundraiserEvent, EventHouse, MasterHouse, Visit, WalkRouteTemplate
 from app.schemas import (
     EventCreate, EventOut, EventAssignRequest,
     EventHouseOut, VisitCreate, VisitOut,
@@ -69,6 +69,40 @@ def list_events(db: Session = Depends(get_db)):
         )
         for ev, cnt in rows
     ]
+
+
+@router.get("/walk-templates", tags=["walk-templates"])
+def list_walk_templates(db: Session = Depends(get_db)):
+    """List all saved walk route templates."""
+    templates = db.query(WalkRouteTemplate).order_by(WalkRouteTemplate.created_at.desc()).all()
+    result = []
+    for t in templates:
+        groups = json.loads(t.groups_json) if t.groups_json else []
+        result.append({
+            "id": str(t.id),
+            "name": t.name,
+            "description": t.description,
+            "created_from_event_id": str(t.created_from_event_id) if t.created_from_event_id else None,
+            "group_count": len(groups),
+            "house_count": sum(len(g.get("house_ids", [])) for g in groups),
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        })
+    return result
+
+
+@router.delete("/walk-templates/{template_id}")
+def delete_walk_template(
+    template_id: str,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a walk route template."""
+    t = db.query(WalkRouteTemplate).filter(WalkRouteTemplate.id == template_id).first()
+    if not t:
+        raise HTTPException(404, "Template not found")
+    db.delete(t)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/{event_id}", response_model=EventOut)
@@ -479,3 +513,136 @@ def list_visits(event_id: str, event_house_id: str, db: Session = Depends(get_db
         .order_by(Visit.visited_at.desc())
         .all()
     )
+
+
+@router.put("/visits/{visit_id}", response_model=VisitOut)
+def update_visit(
+    visit_id: str,
+    body: VisitCreate,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Edit an existing visit record."""
+    visit = db.query(Visit).filter(Visit.id == visit_id).first()
+    if not visit:
+        raise HTTPException(404, "Visit not found")
+    for field in [
+        "outcome", "donation_amount", "tickets_purchased", "notes",
+        "follow_up", "volunteer_name", "scout_name", "scout_id",
+        "door_answer", "donation_given", "former_scout", "avoid_house",
+    ]:
+        setattr(visit, field, getattr(body, field))
+    visit.custom_data = json.dumps(body.custom_data) if body.custom_data else None
+    db.commit()
+    db.refresh(visit)
+    return visit
+
+
+@router.delete("/visits/{visit_id}")
+def delete_visit(
+    visit_id: str,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a visit record."""
+    visit = db.query(Visit).filter(Visit.id == visit_id).first()
+    if not visit:
+        raise HTTPException(404, "Visit not found")
+    db.delete(visit)
+    db.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Walk route templates – save and reuse group assignments
+# ---------------------------------------------------------------------------
+class SaveTemplateBody(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+@router.post("/{event_id}/walk-templates")
+def save_walk_template(
+    event_id: str,
+    body: SaveTemplateBody,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Save the current walk group assignments as a reusable template."""
+    event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Event not found")
+
+    ehs = (
+        db.query(EventHouse)
+        .filter(EventHouse.event_id == event_id, EventHouse.assigned_to.isnot(None))
+        .all()
+    )
+    if not ehs:
+        raise HTTPException(400, "No walk groups to save — generate groups first")
+
+    groups: dict[str, list[str]] = defaultdict(list)
+    for eh in ehs:
+        groups[eh.assigned_to].append(str(eh.house_id))
+
+    groups_list = [{"label": label, "house_ids": ids} for label, ids in groups.items()]
+
+    template = WalkRouteTemplate(
+        name=body.name.strip(),
+        description=body.description,
+        created_from_event_id=event.id,
+        groups_json=json.dumps(groups_list),
+    )
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return {
+        "ok": True,
+        "id": str(template.id),
+        "name": template.name,
+        "groups": len(groups_list),
+        "houses": sum(len(g["house_ids"]) for g in groups_list),
+    }
+
+
+class ApplyTemplateBody(BaseModel):
+    template_id: str
+
+
+@router.post("/{event_id}/apply-walk-template")
+def apply_walk_template(
+    event_id: str,
+    body: ApplyTemplateBody,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Apply a saved walk route template to an event.
+
+    Matches template house_ids to existing EventHouse rows for the event.
+    Houses in the template that aren't assigned to this event are skipped.
+    """
+    event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Event not found")
+
+    template = db.query(WalkRouteTemplate).filter(WalkRouteTemplate.id == body.template_id).first()
+    if not template:
+        raise HTTPException(404, "Template not found")
+
+    groups = json.loads(template.groups_json) if template.groups_json else []
+
+    # Build lookup of house_id -> EventHouse for this event
+    ehs = db.query(EventHouse).filter(EventHouse.event_id == event_id).all()
+    eh_by_house = {str(eh.house_id): eh for eh in ehs}
+
+    applied = 0
+    for group in groups:
+        label = group["label"]
+        for hid in group.get("house_ids", []):
+            eh = eh_by_house.get(hid)
+            if eh:
+                eh.assigned_to = label
+                applied += 1
+
+    db.commit()
+    return {"ok": True, "applied": applied, "total_in_template": sum(len(g.get("house_ids", [])) for g in groups)}

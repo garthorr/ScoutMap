@@ -272,3 +272,39 @@ class AuthSession(Base):
     email = Column(String(320), nullable=False)
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Standalone donations – not tied to a house visit
+# ---------------------------------------------------------------------------
+class Donation(Base):
+    __tablename__ = "donations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id = Column(UUID(as_uuid=True), ForeignKey("fundraiser_events.id"), nullable=True, index=True)
+    amount = Column(Float, nullable=False)
+    donor_name = Column(String(300))
+    scout_name = Column(String(200))
+    scout_id = Column(String(100))
+    notes = Column(Text)
+    donated_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    event = relationship("FundraiserEvent")
+
+
+# ---------------------------------------------------------------------------
+# Walk route templates – reusable group definitions across events
+# ---------------------------------------------------------------------------
+class WalkRouteTemplate(Base):
+    __tablename__ = "walk_route_templates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(200), nullable=False)
+    description = Column(Text)
+    created_from_event_id = Column(UUID(as_uuid=True), ForeignKey("fundraiser_events.id"), nullable=True)
+    # JSON: [{"label": "Group 1 — ...", "house_ids": ["uuid", ...]}]
+    groups_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    source_event = relationship("FundraiserEvent")

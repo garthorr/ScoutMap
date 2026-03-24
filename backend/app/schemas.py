@@ -184,3 +184,43 @@ class DashboardStats(BaseModel):
     total_scouts: int = 0
     assigned_houses: int = 0
     houses_visited: int = 0
+    standalone_donations: float = 0
+
+
+# --- Standalone Donations ---
+class DonationCreate(BaseModel):
+    event_id: Optional[str] = None
+    amount: float
+    donor_name: Optional[str] = None
+    scout_name: Optional[str] = None
+    scout_id: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class DonationOut(BaseModel):
+    id: UUID
+    event_id: Optional[UUID] = None
+    amount: float
+    donor_name: Optional[str] = None
+    scout_name: Optional[str] = None
+    scout_id: Optional[str] = None
+    notes: Optional[str] = None
+    donated_at: datetime
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# --- Walk Route Templates ---
+class WalkRouteTemplateOut(BaseModel):
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    created_from_event_id: Optional[UUID] = None
+    group_count: int = 0
+    house_count: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

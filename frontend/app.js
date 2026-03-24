@@ -322,7 +322,7 @@ async function loadDashboard() {
   // Phase 3: Collect
   document.getElementById("phase-collect-stats").innerHTML =
     _phaseStat("Visits", s.total_visits, "scout-data") +
-    _phaseStat("Donations", "$" + (s.total_donations || 0).toLocaleString(), "scout-data");
+    _phaseStat("Donations", "$" + ((s.total_donations || 0) + (s.standalone_donations || 0)).toLocaleString(), "scout-data");
 }
 
 // --- Map ---
@@ -1527,6 +1527,7 @@ async function loadWalkGroupEvents() {
         return `<option value="${esc(ev.id)}"${selected}>${esc(ev.name)} (${ev.house_count} houses)</option>`;
       }).join("");
     if (currentEventId) loadWalkGroupList();
+    loadWalkTemplates();
   } catch (err) {
     sel.innerHTML = '<option value="">Error loading events</option>';
   }
@@ -1603,6 +1604,77 @@ function exportWalkGroupsCSV() {
       eh.house.owner_name || "", eh.house.zip_code || "", eh.status,
     ])
   );
+}
+
+// --- Walk Route Templates ---
+async function saveWalkTemplate() {
+  if (!currentEventId) { alert("Select an event first."); return; }
+  const name = prompt("Template name:", currentEventName || "Walk Route Template");
+  if (!name) return;
+  try {
+    const r = await authFetch(API + `/api/events/${currentEventId}/walk-templates`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      alert(`Template "${data.name}" saved (${data.groups} groups, ${data.houses} houses).`);
+      loadWalkTemplates();
+    } else {
+      alert(data.detail || "Failed to save template.");
+    }
+  } catch (err) { alert("Error: " + err.message); }
+}
+
+async function loadWalkTemplates() {
+  const el = document.getElementById("wg-templates-list");
+  try {
+    const r = await authFetch(API + "/api/events/walk-templates");
+    if (!r.ok) return;
+    const templates = await r.json();
+    if (!templates.length) {
+      el.innerHTML = "<p>No saved templates.</p>";
+      return;
+    }
+    el.innerHTML = `<table><tr><th>Name</th><th>Groups</th><th>Houses</th><th>Created</th><th></th></tr>` +
+      templates.map(t => `<tr>
+        <td><strong>${esc(t.name)}</strong>${t.description ? `<br><span style="font-size:12px;color:var(--sa-gray);">${esc(t.description)}</span>` : ""}</td>
+        <td>${t.group_count}</td>
+        <td>${t.house_count}</td>
+        <td>${t.created_at ? new Date(t.created_at).toLocaleDateString() : "—"}</td>
+        <td>
+          <button class="btn-sm" onclick="applyWalkTemplate('${esc(t.id)}', '${esc(t.name)}')">Apply to Event</button>
+          <button class="btn-sm btn-danger" onclick="deleteWalkTemplate('${esc(t.id)}')">Delete</button>
+        </td>
+      </tr>`).join("") + `</table>`;
+  } catch { el.innerHTML = "<p>Error loading templates.</p>"; }
+}
+
+async function applyWalkTemplate(templateId, templateName) {
+  if (!currentEventId) { alert("Select an event first."); return; }
+  if (!confirm(`Apply template "${templateName}" to this event? This will update walk group assignments for matching houses.`)) return;
+  try {
+    const r = await authFetch(API + `/api/events/${currentEventId}/apply-walk-template`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template_id: templateId }),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      alert(`Applied: ${data.applied} of ${data.total_in_template} houses matched.`);
+      loadWalkGroupList();
+    } else {
+      alert(data.detail || "Failed to apply template.");
+    }
+  } catch (err) { alert("Error: " + err.message); }
+}
+
+async function deleteWalkTemplate(templateId) {
+  if (!confirm("Delete this template?")) return;
+  try {
+    const r = await authFetch(API + `/api/events/walk-templates/${templateId}`, { method: "DELETE" });
+    if (r.ok) loadWalkTemplates();
+    else alert("Failed to delete template.");
+  } catch (err) { alert("Error: " + err.message); }
 }
 
 function exportEventHousesCSV() {
@@ -2074,7 +2146,7 @@ async function loadScoutData() {
   // Detail table
   const listEl = document.getElementById("scout-data-list");
   if (data.length) {
-    listEl.innerHTML = `<table><tr><th>Time</th><th>Scout</th><th>Address</th><th>Group</th><th>Door</th><th>Donation</th><th>Amount</th><th>Former</th><th>Avoid</th><th>Notes</th></tr>` +
+    listEl.innerHTML = `<table><tr><th>Time</th><th>Scout</th><th>Address</th><th>Group</th><th>Door</th><th>Donation</th><th>Amount</th><th>Former</th><th>Avoid</th><th>Notes</th><th></th></tr>` +
       data.map(v => `<tr>
         <td>${v.visited_at ? new Date(v.visited_at).toLocaleString() : "—"}</td>
         <td>${esc(v.scout_name)}</td>
@@ -2086,10 +2158,17 @@ async function loadScoutData() {
         <td>${v.former_scout == null ? "—" : v.former_scout ? "Yes" : "No"}</td>
         <td>${v.avoid_house ? "YES" : "—"}</td>
         <td>${esc(v.notes)}</td>
+        <td>
+          <button class="btn-sm" onclick="editVisit('${esc(v.id)}')">Edit</button>
+          <button class="btn-sm btn-danger" onclick="deleteVisit('${esc(v.id)}')">Del</button>
+        </td>
       </tr>`).join("") + `</table>`;
   } else {
     listEl.innerHTML = "<p>No visit data yet. Scouts record data at <a href='/scout' target='_blank'>/scout</a>.</p>";
   }
+
+  // Load standalone donations
+  loadDonations();
 }
 
 function exportScoutDataCSV() {
@@ -2105,6 +2184,129 @@ function exportScoutDataCSV() {
       v.avoid_house ? "Yes" : "No", v.notes || "",
     ])
   );
+}
+
+// --- Visit Edit/Delete ---
+async function editVisit(visitId) {
+  const v = _scoutDataCache.find(d => d.id === visitId);
+  if (!v) return;
+  const amount = prompt("Donation amount:", v.donation_amount || "0");
+  if (amount === null) return;
+  const notes = prompt("Notes:", v.notes || "");
+  if (notes === null) return;
+  const body = {
+    outcome: v.outcome, donation_amount: parseFloat(amount) || 0,
+    tickets_purchased: 0, notes: notes, follow_up: false,
+    scout_name: v.scout_name, scout_id: v.scout_id,
+    door_answer: v.door_answer, donation_given: v.donation_given,
+    former_scout: v.former_scout, avoid_house: v.avoid_house,
+    custom_data: v.custom_data,
+  };
+  try {
+    const r = await authFetch(API + `/api/events/visits/${visitId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) loadScoutData();
+    else alert("Failed to update visit.");
+  } catch (err) { alert("Error: " + err.message); }
+}
+
+async function deleteVisit(visitId) {
+  if (!confirm("Delete this visit record?")) return;
+  try {
+    const r = await authFetch(API + `/api/events/visits/${visitId}`, { method: "DELETE" });
+    if (r.ok) loadScoutData();
+    else alert("Failed to delete visit.");
+  } catch (err) { alert("Error: " + err.message); }
+}
+
+// --- Standalone Donations ---
+async function loadDonations() {
+  const eventId = document.getElementById("sd-event-filter").value;
+  const params = eventId ? "?event_id=" + eventId : "";
+  // Populate event select for donation form
+  const donEvtSel = document.getElementById("donation-event-select");
+  if (donEvtSel && !donEvtSel._loaded) {
+    try {
+      const er = await authFetch(API + "/api/events/");
+      const events = await er.json();
+      donEvtSel.innerHTML = '<option value="">No event</option>' +
+        events.map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join("");
+      donEvtSel._loaded = true;
+    } catch { /* ignore */ }
+  }
+
+  try {
+    const r = await authFetch(API + "/api/scout/donations" + params);
+    if (!r.ok) return;
+    const donations = await r.json();
+    const el = document.getElementById("donations-list");
+    if (!donations.length) {
+      el.innerHTML = "<p>No standalone donations yet.</p>";
+      return;
+    }
+    const total = donations.reduce((s, d) => s + (d.amount || 0), 0);
+    el.innerHTML = `<p style="margin-bottom:8px;"><strong>$${total.toLocaleString()}</strong> from ${donations.length} standalone donations</p>` +
+      `<table><tr><th>Date</th><th>Amount</th><th>Donor</th><th>Scout</th><th>Notes</th><th></th></tr>` +
+      donations.map(d => `<tr>
+        <td>${d.donated_at ? new Date(d.donated_at).toLocaleString() : "—"}</td>
+        <td>$${(d.amount || 0).toLocaleString()}</td>
+        <td>${esc(d.donor_name) || "—"}</td>
+        <td>${esc(d.scout_name) || "—"}</td>
+        <td>${esc(d.notes) || "—"}</td>
+        <td>
+          <button class="btn-sm" onclick="editDonation('${esc(d.id)}', ${d.amount}, '${esc(d.donor_name || "")}', '${esc(d.notes || "")}')">Edit</button>
+          <button class="btn-sm btn-danger" onclick="deleteDonation('${esc(d.id)}')">Del</button>
+        </td>
+      </tr>`).join("") + `</table>`;
+  } catch { /* ignore */ }
+}
+
+document.getElementById("donation-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const body = {
+    amount: parseFloat(fd.get("amount")),
+    donor_name: fd.get("donor_name") || null,
+    scout_name: fd.get("scout_name") || null,
+    notes: fd.get("notes") || null,
+    event_id: fd.get("event_id") || null,
+  };
+  try {
+    const r = await authFetch(API + "/api/scout/donations", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) { e.target.reset(); loadDonations(); }
+    else alert("Failed to add donation.");
+  } catch (err) { alert("Error: " + err.message); }
+};
+
+async function editDonation(id, amount, donor, notes) {
+  const newAmount = prompt("Amount:", amount);
+  if (newAmount === null) return;
+  const newDonor = prompt("Donor name:", donor);
+  if (newDonor === null) return;
+  const newNotes = prompt("Notes:", notes);
+  if (newNotes === null) return;
+  try {
+    const r = await authFetch(API + `/api/scout/donations/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: parseFloat(newAmount) || 0, donor_name: newDonor || null, notes: newNotes || null }),
+    });
+    if (r.ok) loadDonations();
+    else alert("Failed to update donation.");
+  } catch (err) { alert("Error: " + err.message); }
+}
+
+async function deleteDonation(id) {
+  if (!confirm("Delete this donation?")) return;
+  try {
+    const r = await authFetch(API + `/api/scout/donations/${id}`, { method: "DELETE" });
+    if (r.ok) loadDonations();
+    else alert("Failed to delete donation.");
+  } catch (err) { alert("Error: " + err.message); }
 }
 
 // --- Scout Form Fields ---

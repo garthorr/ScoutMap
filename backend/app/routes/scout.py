@@ -13,8 +13,9 @@ from typing import Optional
 
 from app.database import get_db
 from app.models import (
-    FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster,
+    FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster, Donation,
 )
+from app.schemas import DonationCreate, DonationOut
 from app.routes.auth import _hash_password, require_admin
 
 router = APIRouter(prefix="/api/scout", tags=["scout"])
@@ -308,3 +309,72 @@ def scout_data_summary(
         "total_donations": total_donations,
         "scouts": scouts,
     }
+
+
+# ---------------------------------------------------------------------------
+# Standalone donations – not tied to a house visit
+# ---------------------------------------------------------------------------
+@router.post("/donations", response_model=DonationOut)
+def create_donation(body: DonationCreate, db: Session = Depends(get_db)):
+    """Record a donation not tied to a specific house."""
+    d = Donation(
+        event_id=body.event_id if body.event_id else None,
+        amount=body.amount,
+        donor_name=body.donor_name,
+        scout_name=body.scout_name,
+        scout_id=body.scout_id,
+        notes=body.notes,
+    )
+    db.add(d)
+    db.commit()
+    db.refresh(d)
+    return d
+
+
+@router.get("/donations", response_model=list[DonationOut])
+def list_donations(
+    event_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """List standalone donations."""
+    q = db.query(Donation)
+    if event_id:
+        q = q.filter(Donation.event_id == event_id)
+    return q.order_by(Donation.donated_at.desc()).all()
+
+
+@router.put("/donations/{donation_id}", response_model=DonationOut)
+def update_donation(
+    donation_id: str,
+    body: DonationCreate,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Edit a standalone donation."""
+    d = db.query(Donation).filter(Donation.id == donation_id).first()
+    if not d:
+        raise HTTPException(404, "Donation not found")
+    d.event_id = body.event_id if body.event_id else None
+    d.amount = body.amount
+    d.donor_name = body.donor_name
+    d.scout_name = body.scout_name
+    d.scout_id = body.scout_id
+    d.notes = body.notes
+    db.commit()
+    db.refresh(d)
+    return d
+
+
+@router.delete("/donations/{donation_id}")
+def delete_donation(
+    donation_id: str,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a standalone donation."""
+    d = db.query(Donation).filter(Donation.id == donation_id).first()
+    if not d:
+        raise HTTPException(404, "Donation not found")
+    db.delete(d)
+    db.commit()
+    return {"ok": True}

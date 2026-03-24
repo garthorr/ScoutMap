@@ -24,7 +24,8 @@ SELECT
    WHERE active = true)                             AS total_scouts,
   (SELECT count(*) FROM event_houses)               AS assigned_houses,
   (SELECT count(DISTINCT event_house_id)
-   FROM visits)                                     AS houses_visited
+   FROM visits)                                     AS houses_visited,
+  (SELECT coalesce(sum(amount), 0) FROM donations)  AS standalone_donations
 """)
 
 
@@ -41,4 +42,5 @@ def dashboard(db: Session = Depends(get_db)):
         total_scouts=row.total_scouts or 0,
         assigned_houses=row.assigned_houses or 0,
         houses_visited=row.houses_visited or 0,
+        standalone_donations=row.standalone_donations or 0,
     )
