@@ -456,7 +456,9 @@ async function loadWalkRoutes(eventId) {
     document.getElementById("map-group-panel").style.display = "none";
     return;
   }
+  try {
   const r = await authFetch(API + `/api/events/${eventId}/houses`);
+  if (!r.ok) { console.error("loadWalkRoutes fetch failed", r.status); return; }
   const houses = await r.json();
   if (!houses.length) {
     document.getElementById("map-group-panel").style.display = "none";
@@ -476,7 +478,7 @@ async function loadWalkRoutes(eventId) {
     const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
     colorIdx++;
 
-    const withCoords = items.filter(eh => eh.house?.latitude && eh.house?.longitude);
+    const withCoords = items.filter(eh => eh.house?.latitude != null && eh.house?.longitude != null);
     if (!withCoords.length) continue;
 
     // Sub-group by street_name within this walk group
@@ -496,19 +498,19 @@ async function loadWalkRoutes(eventId) {
       });
 
       if (streetHouses.length >= 2) {
-        // Compute midline: average lat/lon of adjacent pairs sorted by address
-        // Group into even/odd sides, then average to get center line
         const midCoords = _computeMidline(streetHouses);
-        const line = L.polyline(midCoords, {
-          color, weight: 5, opacity: 0.7, lineCap: "round", lineJoin: "round",
-        });
-        line.bindPopup(`<b>${esc(label)}</b><br>${esc(street)}<br>${streetHouses.length} houses`);
-        walkRouteLayer.addLayer(line);
+        if (midCoords.length >= 2) {
+          const line = L.polyline(midCoords, {
+            color, weight: 5, opacity: 0.7, lineCap: "round", lineJoin: "round",
+          });
+          line.bindPopup(`<b>${esc(label)}</b><br>${esc(street)}<br>${streetHouses.length} houses`);
+          walkRouteLayer.addLayer(line);
+        }
       }
     }
 
     // Draw dots at each house
-    withCoords.forEach((eh, i) => {
+    withCoords.forEach((eh) => {
       const dot = L.circleMarker([eh.house.latitude, eh.house.longitude], {
         radius: 5, fillColor: color, color: "#fff",
         weight: 2, fillOpacity: 1,
@@ -520,12 +522,15 @@ async function loadWalkRoutes(eventId) {
 
   // Fit map to routes
   const allCoords = houses
-    .filter(eh => eh.house?.latitude && eh.house?.longitude)
+    .filter(eh => eh.house?.latitude != null && eh.house?.longitude != null)
     .map(eh => [eh.house.latitude, eh.house.longitude]);
   if (allCoords.length) map.fitBounds(L.latLngBounds(allCoords).pad(0.1));
 
   // Render group manipulation panel
   _renderGroupPanel(eventId, groups);
+  } catch (err) {
+    console.error("loadWalkRoutes error:", err);
+  }
 }
 
 function _renderGroupPanel(eventId, groups) {
