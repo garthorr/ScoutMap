@@ -24,13 +24,7 @@ services:
       - "traefik.http.routers.scoutmap.rule=Host(`scoutmap.oracle.tastymath.com`)"
       - "traefik.http.routers.scoutmap.entrypoints=websecure"
       - "traefik.http.routers.scoutmap.tls=true"
-      - "traefik.http.routers.scoutmap.tls.certresolver=letsencrypt"
       - "traefik.http.services.scoutmap.loadbalancer.server.port=8000"
-      - "traefik.http.routers.scoutmap-http.rule=Host(`scoutmap.oracle.tastymath.com`)"
-      - "traefik.http.routers.scoutmap-http.entrypoints=web"
-      - "traefik.http.routers.scoutmap-http.middlewares=redirect-to-https"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
     environment:
       DATABASE_URL: postgresql://scoutmap:scoutmap@db:5432/scoutmap
     depends_on:
