@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -289,18 +289,196 @@ def count_arcgis_parcels(req: ArcGISCountRequest, _admin: str = Depends(require_
         return {"count": None, "error": str(exc)}
 
 
+def run_arcgis_fetch_task(
+    import_id: str,
+    where: str,
+    bbox: Optional[dict],
+    max_records: int,
+    polygon: Optional[list[list[float]]],
+    event_id: Optional[str] = None,
+):
+    """Background task to fetch ArcGIS parcels and import them."""
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        si = db.query(SourceImport).filter(SourceImport.id == import_id).first()
+        if not si: return
+
+        si.status = "running"
+        si.started_at = datetime.utcnow()
+        db.commit()
+
+        features = _fetch_all_pages(where, bbox, max_records, polygon=polygon)
+        if not features:
+            si.status = "completed"
+            si.completed_at = datetime.utcnow()
+            si.notes = (si.notes or "") + "\nNo parcels found."
+            db.commit()
+            return
+
+        batch_id = si.import_batch_id
+
+        # --- Pre-load existing normalized addresses in bulk ---
+        all_norms = set()
+        parsed_features = []
+        for feat in features:
+            attrs = feat.get("attributes", {})
+            full_addr = _compose_address(attrs)
+            if not full_addr: continue
+            norm = normalize_address(full_addr)
+            parsed_features.append((feat, full_addr, norm))
+            if norm: all_norms.add(norm)
+
+        existing_map: dict[str, MasterHouse] = {}
+        norm_list = list(all_norms)
+        CHUNK = 500
+        for i in range(0, len(norm_list), CHUNK):
+            chunk = norm_list[i:i + CHUNK]
+            rows = db.query(MasterHouse).filter(MasterHouse.normalized_address.in_(chunk)).all()
+            for h in rows:
+                existing_map[h.normalized_address] = h
+
+        imported = 0
+        skipped = 0
+        new_houses = []
+        seen_object_ids = set()
+
+        for feat, full_addr, norm in parsed_features:
+            attrs = feat.get("attributes", {})
+            geom = feat.get("geometry", {})
+            object_id = str(attrs.get("OBJECTID", uuid.uuid4()))
+            if object_id in seen_object_ids: continue
+            seen_object_ids.add(object_id)
+
+            try:
+                owner = str(attrs.get("TAXPANAME1") or "").strip() or None
+                acct = str(attrs.get("ACCT") or attrs.get("GIS_ACCT") or "").strip() or None
+                zip_code = _get_zip5(attrs)
+                city = str(attrs.get("CITY") or "").strip() or "Dallas"
+                legal = _get_legal(attrs)
+                lat, lon = _centroid(geom)
+            except Exception:
+                skipped += 1
+                continue
+
+            if not norm:
+                db.add(UnmatchedRecord(
+                    source_import_id=si.id,
+                    source_name="arcgis_parcels",
+                    source_record_id=object_id,
+                    raw_address=full_addr,
+                    raw_data=json.dumps(attrs),
+                ))
+                imported += 1
+                continue
+
+            prop_cl = str(attrs.get("PROP_CL") or "").strip() or None
+            existing = existing_map.get(norm)
+
+            if existing:
+                house = existing
+                if owner and not house.owner_name: house.owner_name = owner
+                if acct and not house.account_number: house.account_number = acct
+                if not house.latitude and lat: house.latitude = float(lat)
+                if not house.longitude and lon: house.longitude = float(lon)
+                if legal and not house.legal_description: house.legal_description = legal
+                if prop_cl and not house.property_type: house.property_type = prop_cl
+                match_method = "exact"
+            else:
+                parts = parse_address_parts(full_addr)
+                house = MasterHouse(
+                    id=uuid.uuid4(),
+                    full_address=full_addr,
+                    normalized_address=norm,
+                    address_number=parts["address_number"],
+                    street_name=parts["street_name"],
+                    unit=parts["unit"],
+                    city=city,
+                    state="TX",
+                    zip_code=zip_code,
+                    latitude=float(lat) if lat else None,
+                    longitude=float(lon) if lon else None,
+                    owner_name=owner,
+                    account_number=acct,
+                    legal_description=legal or None,
+                    property_type=prop_cl,
+                )
+                db.add(house)
+                new_houses.append(house)
+                existing_map[norm] = house
+                match_method = "new"
+
+            db.add(HouseSourceLink(
+                house_id=house.id,
+                source_import_id=si.id,
+                source_name="arcgis_parcels",
+                source_record_id=object_id,
+                import_batch_id=batch_id,
+                match_method=match_method,
+                raw_data=json.dumps(attrs),
+            ))
+            imported += 1
+            if len(new_houses) >= 200:
+                db.flush()
+                new_houses.clear()
+
+        si.record_count = imported
+        si.status = "completed"
+        si.completed_at = datetime.utcnow()
+
+        if event_id:
+            event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
+            if event:
+                imported_house_ids = list({
+                    row[0] for row in
+                    db.query(HouseSourceLink.house_id)
+                    .filter(HouseSourceLink.source_import_id == si.id)
+                    .all()
+                })
+                already_assigned = set()
+                for i in range(0, len(imported_house_ids), CHUNK):
+                    chunk = imported_house_ids[i:i + CHUNK]
+                    already_assigned.update(
+                        row[0] for row in
+                        db.query(EventHouse.house_id)
+                        .filter(EventHouse.event_id == event.id, EventHouse.house_id.in_(chunk))
+                        .all()
+                    )
+                assigned = 0
+                for house_id in imported_house_ids:
+                    if house_id not in already_assigned:
+                        db.add(EventHouse(event_id=event.id, house_id=house_id))
+                        assigned += 1
+                if assigned:
+                    si.notes = (si.notes or "") + f"\nAuto-assigned {assigned} houses to event: {event.name}"
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("ArcGIS background fetch failed: %s", e, exc_info=True)
+        si = db.query(SourceImport).filter(SourceImport.id == import_id).first()
+        if si:
+            si.status = "failed"
+            si.notes = (si.notes or "") + f"\nError: {str(e)}"
+            db.commit()
+    finally:
+        db.close()
+
+
 @router.post("/fetch")
-def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
-    """Fetch tax parcels from Dallas ArcGIS and import into the database."""
-    # Validate event_id if provided
-    event = None
+def fetch_arcgis_parcels(
+    req: ArcGISFetchRequest,
+    background_tasks: BackgroundTasks,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Trigger background fetch of tax parcels from Dallas ArcGIS."""
     if req.event_id:
         try:
             uuid.UUID(req.event_id)
         except (ValueError, AttributeError):
             raise HTTPException(400, f"Invalid event_id format: {req.event_id}")
-        event = db.query(FundraiserEvent).filter(FundraiserEvent.id == req.event_id).first()
-        if not event:
+        if not db.query(FundraiserEvent).filter(FundraiserEvent.id == req.event_id).first():
             raise HTTPException(400, f"Event not found: {req.event_id}")
 
     where = _build_where(req)
@@ -311,218 +489,30 @@ def fetch_arcgis_parcels(req: ArcGISFetchRequest, _admin: str = Depends(require_
             "xmax": req.bbox_xmax, "ymax": req.bbox_ymax,
         }
 
-    try:
-        features = _fetch_all_pages(where, bbox, req.max_records, polygon=req.polygon)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("ArcGIS fetch failed: %s", exc)
-        raise HTTPException(502, f"Failed to connect to ArcGIS service: {type(exc).__name__}")
-    if not features:
-        return {"status": "ok", "fetched": 0, "imported": 0, "assigned": 0, "message": "No parcels found for that query."}
-
     batch_id = str(uuid.uuid4())
     si = SourceImport(
         source_name="arcgis_parcels",
         file_name=f"arcgis_fetch_{batch_id[:8]}",
         import_batch_id=batch_id,
-        status="running",
-        started_at=datetime.utcnow(),
+        status="pending",
         notes=req.notes or f"ArcGIS fetch: {where}",
     )
     db.add(si)
-    try:
-        db.flush()
-    except Exception as exc:
-        db.rollback()
-        logger.error("Failed to create SourceImport: %s", exc, exc_info=True)
-        raise HTTPException(500, f"Database error creating import record: {type(exc).__name__}: {exc}")
+    db.commit()
+    db.refresh(si)
 
-    # --- Pre-load existing normalized addresses in bulk (avoids N per-row queries) ---
-    all_norms = set()
-    parsed_features = []
-    for feat in features:
-        attrs = feat.get("attributes", {})
-        full_addr = _compose_address(attrs)
-        if not full_addr:
-            continue
-        norm = normalize_address(full_addr)
-        parsed_features.append((feat, full_addr, norm))
-        if norm:
-            all_norms.add(norm)
-
-    # Batch-load existing houses by normalized address (one query instead of N)
-    existing_map: dict[str, MasterHouse] = {}
-    norm_list = list(all_norms)
-    CHUNK = 500
-    try:
-        for i in range(0, len(norm_list), CHUNK):
-            chunk = norm_list[i:i + CHUNK]
-            rows = db.query(MasterHouse).filter(MasterHouse.normalized_address.in_(chunk)).all()
-            for h in rows:
-                existing_map[h.normalized_address] = h
-    except Exception as exc:
-        db.rollback()
-        logger.error("Failed to pre-load existing houses: %s", exc, exc_info=True)
-        raise HTTPException(500, f"Database error loading existing houses: {type(exc).__name__}: {exc}")
-
-    imported = 0
-    skipped = 0
-    new_houses: list[MasterHouse] = []
-    seen_object_ids: set[str] = set()  # deduplicate features from overlapping pages
-
-    for feat, full_addr, norm in parsed_features:
-        attrs = feat.get("attributes", {})
-        geom = feat.get("geometry", {})
-
-        object_id = str(attrs.get("OBJECTID", uuid.uuid4()))
-        if object_id in seen_object_ids:
-            continue  # skip duplicates from ArcGIS pagination overlap
-        seen_object_ids.add(object_id)
-
-        try:
-            owner = str(attrs.get("TAXPANAME1") or "").strip() or None
-            acct = str(attrs.get("ACCT") or attrs.get("GIS_ACCT") or "").strip() or None
-            zip_code = _get_zip5(attrs)
-            city = str(attrs.get("CITY") or "").strip() or "Dallas"
-            legal = _get_legal(attrs)
-            lat, lon = _centroid(geom)
-        except Exception as exc:
-            logger.warning("Skipping feature %s: %s", object_id, exc)
-            skipped += 1
-            continue
-
-        if not norm:
-            db.add(UnmatchedRecord(
-                source_import_id=si.id,
-                source_name="arcgis_parcels",
-                source_record_id=object_id,
-                raw_address=full_addr,
-                raw_data=json.dumps(attrs),
-            ))
-            imported += 1
-            continue
-
-        prop_cl = str(attrs.get("PROP_CL") or "").strip() or None
-
-        existing = existing_map.get(norm)
-        if existing:
-            house = existing
-            if owner and not house.owner_name:
-                house.owner_name = owner
-            if acct and not house.account_number:
-                house.account_number = acct
-            if not house.latitude and lat:
-                house.latitude = float(lat)
-            if not house.longitude and lon:
-                house.longitude = float(lon)
-            if legal and not house.legal_description:
-                house.legal_description = legal
-            if prop_cl and not house.property_type:
-                house.property_type = prop_cl
-            match_method = "exact"
-        else:
-            parts = parse_address_parts(full_addr)
-            house = MasterHouse(
-                id=uuid.uuid4(),
-                full_address=full_addr,
-                normalized_address=norm,
-                address_number=parts["address_number"],
-                street_name=parts["street_name"],
-                unit=parts["unit"],
-                city=city,
-                state="TX",
-                zip_code=zip_code,
-                latitude=float(lat) if lat else None,
-                longitude=float(lon) if lon else None,
-                owner_name=owner,
-                account_number=acct,
-                legal_description=legal or None,
-                property_type=prop_cl,
-            )
-            db.add(house)
-            new_houses.append(house)
-            existing_map[norm] = house  # dedup within batch
-            match_method = "new"
-
-        link = HouseSourceLink(
-            house_id=house.id,
-            source_import_id=si.id,
-            source_name="arcgis_parcels",
-            source_record_id=object_id,
-            import_batch_id=batch_id,
-            match_method=match_method,
-            raw_data=json.dumps(attrs),
-        )
-        db.add(link)
-        imported += 1
-
-        # Flush in batches of 200 to keep memory stable (generates IDs for new houses)
-        if len(new_houses) >= 200:
-            try:
-                db.flush()
-            except Exception as exc:
-                db.rollback()
-                logger.error("Batch flush failed at %d houses: %s", imported, exc, exc_info=True)
-                raise HTTPException(500, f"Database error at record {imported}: {type(exc).__name__}: {exc}")
-            new_houses.clear()
-
-    # Final flush for remaining new houses
-    if new_houses:
-        try:
-            db.flush()
-        except Exception as exc:
-            db.rollback()
-            logger.error("Final flush failed at %d houses: %s", imported, exc, exc_info=True)
-            raise HTTPException(500, f"Database error at final flush: {type(exc).__name__}: {exc}")
-
-    si.record_count = imported
-    si.status = "completed"
-    si.completed_at = datetime.utcnow()
-
-    # Auto-assign imported houses to event if event_id was provided
-    assigned = 0
-    if event:
-        # Use a set to deduplicate — multiple parcels can map to the same house
-        imported_house_ids = list({
-            row[0] for row in
-            db.query(HouseSourceLink.house_id)
-            .filter(HouseSourceLink.source_import_id == si.id)
-            .all()
-        })
-        if imported_house_ids:
-            already_assigned = set()
-            for i in range(0, len(imported_house_ids), CHUNK):
-                chunk = imported_house_ids[i:i + CHUNK]
-                already_assigned.update(
-                    row[0] for row in
-                    db.query(EventHouse.house_id)
-                    .filter(
-                        EventHouse.event_id == event.id,
-                        EventHouse.house_id.in_(chunk),
-                    )
-                    .all()
-                )
-            for house_id in imported_house_ids:
-                if house_id not in already_assigned:
-                    db.add(EventHouse(event_id=event.id, house_id=house_id))
-                    assigned += 1
-
-    try:
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        logger.error("ArcGIS import commit failed: %s", exc, exc_info=True)
-        raise HTTPException(500, f"Database error while saving imported parcels: {type(exc).__name__}: {exc}")
-
-    logger.info("ArcGIS import complete: fetched=%d imported=%d skipped=%d assigned=%d",
-                len(features), imported, skipped, assigned)
+    background_tasks.add_task(
+        run_arcgis_fetch_task,
+        str(si.id),
+        where,
+        bbox,
+        req.max_records,
+        req.polygon,
+        req.event_id
+    )
 
     return {
         "status": "ok",
-        "fetched": len(features),
-        "imported": imported,
-        "assigned": assigned,
-        "event_name": event.name if event else None,
         "import_id": str(si.id),
+        "message": "Fetch started in background."
     }

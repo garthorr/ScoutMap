@@ -2250,3 +2250,23 @@ document.getElementById("form-field-create").onsubmit = async (e) => {
 _checkAuth().then(() => {
   if (_authToken) loadDashboard();
 });
+
+/**
+ * Reset all house filter inputs and reload the full list.
+ */
+function clearHouseFilters() {
+    const addr = document.getElementById('house-address');
+    const zip = document.getElementById('house-zip');
+    if (addr) addr.value = '';
+    if (zip) zip.value = '';
+    loadHouses();
+}
+
+/**
+ * Reset all scout data filter inputs and reload the full list.
+ */
+function clearScoutDataFilters() {
+    const eventFilter = document.getElementById('sd-event-filter');
+    if (eventFilter) eventFilter.value = '';
+    loadScoutData();
+}
