@@ -1,4 +1,19 @@
 services:
+  traefik:
+    image: traefik:v3.1
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - traefik
+
   db:
     image: postgres:16-alpine
     environment:
@@ -7,20 +22,24 @@ services:
       POSTGRES_DB: scoutmap
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U scoutmap"]
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - traefik
 
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.scoutmap.rule=Host(`scoutmap.oracle.tastymath.com`)"
+      - "traefik.http.routers.scoutmap.entrypoints=websecure"
+      - "traefik.http.routers.scoutmap.tls=true"
+      - "traefik.http.services.scoutmap.loadbalancer.server.port=8000"
     env_file:
       - .env
     environment:
@@ -30,6 +49,13 @@ services:
         condition: service_healthy
     volumes:
       - ./sample_data:/app/sample_data
+    networks:
+      - traefik
+
+networks:
+  traefik:
+    external: true
+    name: traefik
 
 volumes:
   pgdata:

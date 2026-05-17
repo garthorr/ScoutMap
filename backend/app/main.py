@@ -17,8 +17,28 @@ from app.routes.auth import router as auth_router, get_current_user
 from app.routes.form_fields import router as form_fields_router, seed_default_fields
 from app.models import AllowedEmail, AuthSession
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
-logger = logging.getLogger(__name__)
+import json
+
+class StructuredFormatter(logging.Formatter):
+    def format(self, record):
+        log_entry = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_entry)
+
+logger = logging.getLogger("scoutmap")
+handler = logging.StreamHandler()
+handler.setFormatter(StructuredFormatter())
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+# Suppress overly verbose logs from other libraries if needed
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
 # In-memory session token cache (avoids a DB query on every API request)
@@ -56,37 +76,29 @@ def invalidate_session_cache(token: str):
     """Call on logout to immediately remove a token from cache."""
     _SESSION_CACHE.pop(token, None)
 
-# Create all tables on startup (handles NEW tables, but not new columns)
-Base.metadata.create_all(bind=engine)
+# In production, migrations should be run via 'alembic upgrade head'
+# For convenience in development/simple deployments, we can trigger it programmatically
+def _run_migrations():
+    import os
+    from alembic import command
+    from alembic.config import Config
 
+    # Path to alembic.ini relative to this file
+    base_dir = Path(__file__).resolve().parent.parent
+    ini_path = base_dir / "alembic.ini"
 
-def _ensure_columns():
-    """Add any missing columns to existing tables.
+    if ini_path.exists():
+        logger.info("Running database migrations...")
+        alembic_cfg = Config(str(ini_path))
+        # Ensure alembic uses the correct database URL
+        alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+        command.upgrade(alembic_cfg, "head")
+    else:
+        logger.warning("alembic.ini not found at %s, skipping migrations", ini_path)
+        # Fallback to create_all if migrations are not set up
+        Base.metadata.create_all(bind=engine)
 
-    create_all only creates new tables — it will not ALTER existing ones.
-    This function inspects the live database schema and issues ALTER TABLE
-    statements for any columns defined in the ORM models but absent from
-    the actual table.
-    """
-    inspector = inspect(engine)
-    with engine.begin() as conn:
-        for table in Base.metadata.sorted_tables:
-            if not inspector.has_table(table.name):
-                continue  # table will be created by create_all
-            existing = {c["name"] for c in inspector.get_columns(table.name)}
-            for col in table.columns:
-                if col.name not in existing:
-                    col_type = col.type.compile(engine.dialect)
-                    nullable = "NULL" if col.nullable else "NOT NULL"
-                    default = ""
-                    if col.default is not None:
-                        default = f" DEFAULT {col.default.arg!r}" if hasattr(col.default, "arg") else ""
-                    stmt = f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {col_type} {nullable}{default}'
-                    logger.info("Adding missing column: %s.%s", table.name, col.name)
-                    conn.execute(text(stmt))
-
-
-_ensure_columns()
+_run_migrations()
 
 
 def _seed_allowed_emails():

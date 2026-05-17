@@ -587,3 +587,10 @@ _checkAuth().then(() => {
     loadFormFieldConfig();
   }
 });
+
+// Tap-to-dismiss for any future toasts if added
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".toast")) {
+    e.target.closest(".toast").style.display = "none";
+  }
+});

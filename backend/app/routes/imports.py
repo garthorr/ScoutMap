@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -26,8 +26,88 @@ UPLOAD_DIR = Path("/tmp/scoutmap_uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 
+def run_import_task(
+    import_id: str,
+    source_name: str,
+    file_path: str,
+    event_id: str | None = None,
+):
+    """Background task to run an importer and optionally assign houses to an event."""
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        si = db.query(SourceImport).filter(SourceImport.id == import_id).first()
+        if not si:
+            return
+
+        si.status = "running"
+        si.started_at = datetime.utcnow()
+        db.commit()
+
+        importer = get_importer(source_name)
+        count = importer(db, file_path, import_id)
+
+        si.record_count = count
+        si.status = "completed"
+        si.completed_at = datetime.utcnow()
+
+        # Auto-assign imported houses to event if event_id was provided
+        if event_id:
+            event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
+            if event:
+                imported_house_ids = [
+                    row[0] for row in
+                    db.query(HouseSourceLink.house_id)
+                    .filter(HouseSourceLink.source_import_id == import_id)
+                    .all()
+                ]
+                # Only assign houses that have coordinates
+                houses_with_coords = set(
+                    row[0] for row in
+                    db.query(MasterHouse.id)
+                    .filter(
+                        MasterHouse.id.in_(imported_house_ids),
+                        MasterHouse.latitude.isnot(None),
+                        MasterHouse.longitude.isnot(None),
+                    )
+                    .all()
+                ) if imported_house_ids else set()
+
+                # Skip houses already assigned
+                already_assigned = set(
+                    row[0] for row in
+                    db.query(EventHouse.house_id)
+                    .filter(
+                        EventHouse.event_id == event.id,
+                        EventHouse.house_id.in_(list(houses_with_coords)),
+                    )
+                    .all()
+                ) if houses_with_coords else set()
+
+                assigned = 0
+                for house_id in houses_with_coords:
+                    if house_id not in already_assigned:
+                        db.add(EventHouse(event_id=event.id, house_id=house_id))
+                        assigned += 1
+
+                if assigned:
+                    si.notes = (si.notes or "") + f"\nAuto-assigned {assigned} houses to event: {event.name}"
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        si = db.query(SourceImport).filter(SourceImport.id == import_id).first()
+        if si:
+            si.status = "failed"
+            si.notes = (si.notes or "") + f"\nError: {str(e)}"
+            db.commit()
+    finally:
+        db.close()
+
+
 @router.post("/", response_model=SourceImportOut)
 async def create_import(
+    background_tasks: BackgroundTasks,
     source_name: str = Form(...),
     file: UploadFile = File(...),
     notes: str = Form(None),
@@ -40,7 +120,6 @@ async def create_import(
         raise HTTPException(400, f"Unknown source: {source_name}. Available: dallas_gis, dcad")
 
     # Validate event_id if provided
-    event = None
     if event_id:
         event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
         if not event:
@@ -51,14 +130,14 @@ async def create_import(
         source_name=source_name,
         file_name=file.filename,
         import_batch_id=batch_id,
-        status="running",
-        started_at=datetime.utcnow(),
+        status="pending",
         notes=notes,
     )
     db.add(si)
-    db.flush()
+    db.commit()
+    db.refresh(si)
 
-    # Save uploaded file (sanitize filename to prevent path traversal)
+    # Save uploaded file
     safe_name = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
     if not safe_name:
         safe_name = "upload"
@@ -66,55 +145,8 @@ async def create_import(
     with open(dest, "wb") as f_out:
         shutil.copyfileobj(file.file, f_out)
 
-    try:
-        count = importer(db, str(dest), str(si.id))
-        si.record_count = count
-        si.status = "completed"
-        si.completed_at = datetime.utcnow()
-    except Exception as e:
-        si.status = "failed"
-        si.notes = (si.notes or "") + f"\nError: {str(e)}"
-        db.commit()
-        raise HTTPException(500, f"Import failed: {e}")
+    background_tasks.add_task(run_import_task, str(si.id), source_name, str(dest), event_id)
 
-    # Auto-assign imported houses to event if event_id was provided
-    assigned = 0
-    if event:
-        imported_house_ids = [
-            row[0] for row in
-            db.query(HouseSourceLink.house_id)
-            .filter(HouseSourceLink.source_import_id == str(si.id))
-            .all()
-        ]
-        # Only assign houses that have coordinates (needed for map/walk groups)
-        houses_with_coords = set(
-            row[0] for row in
-            db.query(MasterHouse.id)
-            .filter(
-                MasterHouse.id.in_(imported_house_ids),
-                MasterHouse.latitude.isnot(None),
-                MasterHouse.longitude.isnot(None),
-            )
-            .all()
-        ) if imported_house_ids else set()
-        # Skip houses already assigned to this event
-        already_assigned = set(
-            row[0] for row in
-            db.query(EventHouse.house_id)
-            .filter(
-                EventHouse.event_id == event.id,
-                EventHouse.house_id.in_(list(houses_with_coords)),
-            )
-            .all()
-        ) if houses_with_coords else set()
-        for house_id in houses_with_coords:
-            if house_id not in already_assigned:
-                db.add(EventHouse(event_id=event.id, house_id=house_id))
-                assigned += 1
-        if assigned:
-            si.notes = (si.notes or "") + f"\nAuto-assigned {assigned} houses to event: {event.name}"
-
-    db.commit()
     return si
 
 
