@@ -90,8 +90,9 @@ def _run_migrations():
     if ini_path.exists():
         logger.info("Running database migrations...")
         alembic_cfg = Config(str(ini_path))
-        # Ensure alembic uses the correct database URL
+        # Ensure alembic uses the correct database URL and finds the migrations folder
         alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+        alembic_cfg.set_main_option("script_location", str(base_dir / "migrations"))
         command.upgrade(alembic_cfg, "head")
     else:
         logger.warning("alembic.ini not found at %s, skipping migrations", ini_path)
