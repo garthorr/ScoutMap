@@ -27,6 +27,7 @@ services:
       - "traefik.http.services.scoutmap.loadbalancer.server.port=8000"
     environment:
       DATABASE_URL: postgresql://scoutmap:scoutmap@db:5432/scoutmap
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     depends_on:
       db:
         condition: service_healthy

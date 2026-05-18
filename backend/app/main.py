@@ -8,7 +8,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 
-from sqlalchemy import inspect, text
 
 from app.config import settings
 from app.database import engine, Base, get_db
