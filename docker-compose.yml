@@ -1,9 +1,10 @@
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: scoutmap
-      POSTGRES_PASSWORD: scoutmap
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: scoutmap
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -19,6 +20,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    restart: unless-stopped
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.scoutmap.rule=Host(`scoutmap.oracle.tastymath.com`)"
@@ -26,8 +28,17 @@ services:
       - "traefik.http.routers.scoutmap.tls=true"
       - "traefik.http.services.scoutmap.loadbalancer.server.port=8000"
     environment:
-      DATABASE_URL: postgresql://scoutmap:scoutmap@db:5432/scoutmap
+      DATABASE_URL: postgresql://scoutmap:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/scoutmap
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-scoutmap@localhost}
+      # The container entrypoint runs migrations before uvicorn starts,
+      # so the app workers must not race to run them again.
+      AUTO_MIGRATE: "false"
     depends_on:
       db:
         condition: service_healthy

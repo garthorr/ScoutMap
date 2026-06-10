@@ -80,7 +80,10 @@ async def import_roster_csv(file: UploadFile = File(...), _admin: str = Depends(
 
     Extra columns are ignored. Duplicate names (case-insensitive) are skipped.
     """
-    content = await file.read()
+    MAX_ROSTER_CSV = 5 * 1024 * 1024
+    content = await file.read(MAX_ROSTER_CSV + 1)
+    if len(content) > MAX_ROSTER_CSV:
+        raise HTTPException(413, "Roster CSV exceeds the 5 MB limit")
     text = content.decode("utf-8-sig")  # handle BOM from Excel
     reader = csv.DictReader(io.StringIO(text))
 
@@ -213,6 +216,7 @@ def list_group_houses(
 @router.get("/data")
 def scout_data(
     event_id: Optional[str] = None,
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return all visit data entered by scouts, with house/event info."""
@@ -258,6 +262,7 @@ def scout_data(
 @router.get("/data/summary")
 def scout_data_summary(
     event_id: Optional[str] = None,
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Aggregate stats for scout data using SQL GROUP BY."""

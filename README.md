@@ -34,13 +34,16 @@ A door-to-door fundraising management application that uses **public data as the
 # Clone and start
 git clone <repo-url>
 cd ScoutMap
+cp .env.example .env   # then set POSTGRES_PASSWORD (required) and other secrets
 docker compose up --build
 
 # Admin app:  http://localhost:8000
 # Scout app:  http://localhost:8000/scout
 ```
 
-The database is created automatically on first startup.
+The database is created automatically on first startup (migrations run once
+via the container entrypoint before the web workers start). A `/healthz`
+endpoint reports app + database health and backs the container healthcheck.
 
 ## Three-Phase Workflow
 
@@ -312,13 +315,17 @@ docker compose up --build
 
 | Variable | Required | Description |
 |----------|----------|-------------|
+| `POSTGRES_PASSWORD` | Yes (compose) | Database password; compose refuses to start without it |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `ADMIN_PASSWORD` | No | Master admin password for login |
-| `SMTP_HOST` | No | SMTP server for email OTP |
+| `ALLOWED_EMAILS` | No | Comma-separated email allowlist seed (supports `*@domain` wildcards) |
+| `SMTP_HOST` | No | SMTP server for email OTP — without it, codes are logged (dev only) |
 | `SMTP_PORT` | No | SMTP port (default 587) |
 | `SMTP_USER` | No | SMTP username |
 | `SMTP_PASSWORD` | No | SMTP password |
 | `SMTP_FROM` | No | From address for OTP emails |
+| `MAX_UPLOAD_MB` | No | Import upload size cap (default 50) |
+| `AUTO_MIGRATE` | No | Run migrations in the app lifespan (default true; Docker sets false because the entrypoint runs them) |
 
 ## License
 

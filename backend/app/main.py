@@ -1,20 +1,23 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.gzip import GZipMiddleware
 from pathlib import Path
 
 
 from app.config import settings
-from app.database import engine, Base, get_db
+from app import startup
 from app.routes import imports, houses, events, stats, arcgis, scout
-from app.routes.auth import router as auth_router, get_current_user
-from app.routes.form_fields import router as form_fields_router, seed_default_fields
-from app.models import AllowedEmail, AuthSession
+from app.routes.auth import router as auth_router, hash_token
+from app.routes.form_fields import router as form_fields_router
+from app.models import AuthSession
 
 import json
 
@@ -41,28 +44,29 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
 # In-memory session token cache (avoids a DB query on every API request)
+# Keys are SHA-256 token hashes — raw tokens are never held here.
 # ---------------------------------------------------------------------------
-_SESSION_CACHE: dict[str, tuple[float, str]] = {}  # token → (expiry timestamp, email)
+_SESSION_CACHE: dict[str, tuple[float, str]] = {}  # token hash → (expiry timestamp, email)
 _SESSION_CACHE_TTL = 120  # seconds before re-checking DB
 
 
-def _session_valid_cached(token: str) -> str | None:
+def _session_valid_cached(token_hash: str) -> str | None:
     """Return the user email from cache, or None if cache miss / expired."""
-    entry = _SESSION_CACHE.get(token)
+    entry = _SESSION_CACHE.get(token_hash)
     if entry is None:
         return None
     expiry, email = entry
     if time.time() > expiry:
-        _SESSION_CACHE.pop(token, None)
+        _SESSION_CACHE.pop(token_hash, None)
         return None  # cache entry expired, need to re-check
     return email
 
 
-def _cache_session(token: str, db_expires_at: datetime, email: str):
+def _cache_session(token_hash: str, db_expires_at: datetime, email: str):
     """Cache a valid session.  Evict stale entries when cache grows."""
     # Use the shorter of DB session expiry and cache TTL
     cache_until = min(db_expires_at.timestamp(), time.time() + _SESSION_CACHE_TTL)
-    _SESSION_CACHE[token] = (cache_until, email)
+    _SESSION_CACHE[token_hash] = (cache_until, email)
     # Lazy evict: if cache > 500 entries, drop expired ones
     if len(_SESSION_CACHE) > 500:
         now = time.time()
@@ -71,100 +75,43 @@ def _cache_session(token: str, db_expires_at: datetime, email: str):
             del _SESSION_CACHE[k]
 
 
-def invalidate_session_cache(token: str):
-    """Call on logout to immediately remove a token from cache."""
-    _SESSION_CACHE.pop(token, None)
-
-# In production, migrations should be run via 'alembic upgrade head'
-# For convenience in development/simple deployments, we can trigger it programmatically
-def _run_migrations():
-    import os
-    from alembic import command
-    from alembic.config import Config
-
-    # Path to alembic.ini relative to this file
-    base_dir = Path(__file__).resolve().parent.parent
-    ini_path = base_dir / "alembic.ini"
-
-    if ini_path.exists():
-        logger.info("Running database migrations...")
-        alembic_cfg = Config(str(ini_path))
-        alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
-        alembic_cfg.set_main_option("script_location", str(base_dir / "migrations"))
-        from sqlalchemy import inspect, text
-        with engine.connect() as conn:
-            tables = inspect(engine).get_table_names()
-            has_version = "alembic_version" in tables
-            has_app_tables = "allowed_emails" in tables
-            if not has_version and has_app_tables:
-                # Tables exist but were created outside Alembic — stamp to avoid re-running migrations
-                logger.warning("Tables exist without alembic_version — stamping as head")
-                conn.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"))
-                conn.execute(text("INSERT INTO alembic_version VALUES ('e662a51ab537')"))
-                conn.commit()
-        command.upgrade(alembic_cfg, "head")
-    else:
-        logger.warning("alembic.ini not found at %s, skipping migrations", ini_path)
-        Base.metadata.create_all(bind=engine, checkfirst=True)
-
-_run_migrations()
+def invalidate_session_cache(token_hash: str):
+    """Call on logout to immediately remove a token from this worker's cache."""
+    _SESSION_CACHE.pop(token_hash, None)
 
 
-def _seed_allowed_emails():
-    """Seed allowed emails from ALLOWED_EMAILS env var if table is empty."""
-    if not settings.allowed_emails:
-        return
-    from app.database import SessionLocal
-    db = SessionLocal()
-    try:
-        if db.query(AllowedEmail).count() > 0:
-            return  # already seeded
-        for raw in settings.allowed_emails.split(","):
-            email = raw.strip().lower()
-            if email:
-                db.add(AllowedEmail(email=email))
-                logger.info("Seeded allowed email: %s", email)
-        db.commit()
-    finally:
-        db.close()
+def invalidate_sessions_for_email(email: str):
+    """Drop all cached sessions for a user (password reset, deactivation)."""
+    stale = [k for k, (_exp, e) in _SESSION_CACHE.items() if e == email]
+    for k in stale:
+        _SESSION_CACHE.pop(k, None)
 
 
-_seed_allowed_emails()
+# ---------------------------------------------------------------------------
+# Lifespan: startup tasks + periodic expired-session cleanup
+# ---------------------------------------------------------------------------
+async def _periodic_cleanup():
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            await asyncio.to_thread(startup.cleanup_expired_sessions)
+        except Exception:
+            logger.exception("Periodic session cleanup failed")
 
 
-def _seed_form_fields():
-    from app.database import SessionLocal
-    db = SessionLocal()
-    try:
-        seed_default_fields(db)
-    finally:
-        db.close()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.auto_migrate:
+        # In Docker, `python -m app.startup` runs before uvicorn and
+        # AUTO_MIGRATE is false, so multiple workers don't race here.
+        startup.run_all()
+    cleanup_task = asyncio.create_task(_periodic_cleanup())
+    yield
+    cleanup_task.cancel()
 
 
-_seed_form_fields()
-
-
-def _cleanup_expired_sessions():
-    """Remove expired sessions and auth codes from the database."""
-    from app.database import SessionLocal
-    from app.models import AuthCode
-    db = SessionLocal()
-    try:
-        now = datetime.utcnow()
-        expired_sessions = db.query(AuthSession).filter(AuthSession.expires_at < now).delete(synchronize_session=False)
-        expired_codes = db.query(AuthCode).filter(AuthCode.expires_at < now).delete(synchronize_session=False)
-        if expired_sessions or expired_codes:
-            db.commit()
-            logger.info("Cleaned up %d expired sessions, %d expired auth codes", expired_sessions, expired_codes)
-    except Exception:
-        db.rollback()
-    finally:
-        db.close()
-
-
-_cleanup_expired_sessions()
-
-app = FastAPI(title=settings.app_title)
+app = FastAPI(title=settings.app_title, lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Public paths that don't require authentication
 _PUBLIC_PATHS = {
@@ -174,6 +121,30 @@ _PUBLIC_PATHS = {
 }
 _PUBLIC_PREFIXES = ("/static/", "/api/auth/")
 
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+    # 'unsafe-inline' is required by the existing inline onclick handlers;
+    # external scripts are still restricted to self + unpkg (Leaflet).
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "img-src 'self' data: https://unpkg.com https://*.tile.openstreetmap.org; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'"
+    ),
+}
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    for k, v in _SECURITY_HEADERS.items():
+        response.headers.setdefault(k, v)
+    return response
+
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -181,7 +152,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Skip auth for static files, auth endpoints, and page routes
-    if path in ("/", "/scout", "/favicon.ico"):
+    if path in ("/", "/scout", "/favicon.ico", "/healthz"):
         return await call_next(request)
     if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
         return await call_next(request)
@@ -198,8 +169,10 @@ async def auth_middleware(request: Request, call_next):
         if not token:
             return JSONResponse({"detail": "Not authenticated"}, status_code=401)
 
+        token_hash = hash_token(token)
+
         # Fast-path: check in-memory cache first
-        cached_email = _session_valid_cached(token)
+        cached_email = _session_valid_cached(token_hash)
         if cached_email is not None:
             # Cache hit — store email so get_current_user skips a DB query
             request.state.user_email = cached_email
@@ -209,17 +182,33 @@ async def auth_middleware(request: Request, call_next):
             db = SessionLocal()
             try:
                 session = db.query(AuthSession).filter(
-                    AuthSession.token == token,
+                    AuthSession.token == token_hash,
                     AuthSession.expires_at > datetime.utcnow(),
                 ).first()
                 if not session:
                     return JSONResponse({"detail": "Session expired or invalid"}, status_code=401)
-                _cache_session(token, session.expires_at, session.email)
+                _cache_session(token_hash, session.expires_at, session.email)
                 request.state.user_email = session.email
             finally:
                 db.close()
 
     return await call_next(request)
+
+
+@app.get("/healthz")
+def healthz():
+    """Liveness/readiness probe: verifies the database is reachable."""
+    from sqlalchemy import text
+    from app import database
+    try:
+        db = database.SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+        finally:
+            db.close()
+    except Exception:
+        return JSONResponse({"status": "unhealthy", "database": "unreachable"}, status_code=503)
+    return {"status": "ok"}
 
 
 # Register API routers

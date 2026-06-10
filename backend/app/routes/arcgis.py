@@ -222,7 +222,7 @@ def _fetch_all_pages(
 # ---------------------------------------------------------------------------
 
 @router.get("/test")
-def test_arcgis_connection():
+def test_arcgis_connection(_admin: str = Depends(require_admin)):
     """Diagnostic: fetch 1 record from ArcGIS and return the raw response."""
     try:
         with httpx.Client(timeout=30) as client:

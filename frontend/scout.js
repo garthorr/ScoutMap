@@ -15,7 +15,10 @@ let eventsData = [];
 let formFields = []; // dynamic field config from server
 
 // --- Auth ---
-let _authToken = localStorage.getItem("scoutmap_token") || "";
+// The session lives in an HttpOnly cookie set by the server; the token is
+// kept in memory only (never localStorage) so XSS can't steal it.
+let _authToken = "";
+localStorage.removeItem("scoutmap_token"); // clean up legacy storage
 let _loginRoster = [];
 
 function authFetch(url, opts = {}) {
@@ -25,11 +28,10 @@ function authFetch(url, opts = {}) {
 }
 
 async function _checkAuth() {
-  if (!_authToken) { _showLoginOverlay(); return; }
   try {
     const r = await authFetch(API + "/api/auth/me");
     if (r.ok) { _hideLoginOverlay(); }
-    else { _authToken = ""; localStorage.removeItem("scoutmap_token"); _showLoginOverlay(); }
+    else { _authToken = ""; _showLoginOverlay(); }
   } catch { _showLoginOverlay(); }
 }
 
@@ -89,7 +91,6 @@ async function scoutPasswordLogin() {
     const data = await r.json();
     if (r.ok && data.token) {
       _authToken = data.token;
-      localStorage.setItem("scoutmap_token", _authToken);
       scoutName = data.scout_name;
       scoutIdNum = data.scout_id || "";
       localStorage.setItem("scoutmap_scout", JSON.stringify({
@@ -122,7 +123,6 @@ async function scoutAdminLogin() {
     const data = await r.json();
     if (r.ok && data.token) {
       _authToken = data.token;
-      localStorage.setItem("scoutmap_token", _authToken);
       _hideLoginOverlay();
       loadRoster(); loadEvents(); loadFormFieldConfig();
     } else {
@@ -190,7 +190,6 @@ function saveScoutInfo() {
 function scoutLogout() {
   try { authFetch(API + "/api/auth/logout", { method: "POST" }); } catch { /* ok */ }
   _authToken = "";
-  localStorage.removeItem("scoutmap_token");
   localStorage.removeItem("scoutmap_scout");
   scoutName = "";
   scoutIdNum = "";

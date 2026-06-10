@@ -1,15 +1,13 @@
 """Import endpoints – upload public data files and trigger import pipelines."""
 
 import uuid
-import shutil
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
+from app.config import settings
 from app.database import get_db
 from app.models import SourceImport, UnmatchedRecord, HouseSourceLink, MasterHouse, EventHouse, FundraiserEvent
 from app.schemas import SourceImportOut, UnmatchedRecordOut
@@ -137,13 +135,25 @@ async def create_import(
     db.commit()
     db.refresh(si)
 
-    # Save uploaded file
+    # Save uploaded file, enforcing the size cap as we stream
     safe_name = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
     if not safe_name:
         safe_name = "upload"
     dest = UPLOAD_DIR / f"{si.id}_{safe_name}"
-    with open(dest, "wb") as f_out:
-        shutil.copyfileobj(file.file, f_out)
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    written = 0
+    try:
+        with open(dest, "wb") as f_out:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(413, f"File exceeds the {settings.max_upload_mb} MB upload limit")
+                f_out.write(chunk)
+    except HTTPException:
+        dest.unlink(missing_ok=True)
+        db.delete(si)
+        db.commit()
+        raise
 
     background_tasks.add_task(run_import_task, str(si.id), source_name, str(dest), event_id)
 
@@ -151,12 +161,12 @@ async def create_import(
 
 
 @router.get("/", response_model=list[SourceImportOut])
-def list_imports(db: Session = Depends(get_db)):
+def list_imports(_admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     return db.query(SourceImport).order_by(SourceImport.created_at.desc()).all()
 
 
 @router.get("/{import_id}", response_model=SourceImportOut)
-def get_import(import_id: str, db: Session = Depends(get_db)):
+def get_import(import_id: str, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     si = db.query(SourceImport).filter(SourceImport.id == import_id).first()
     if not si:
         raise HTTPException(404, "Import not found")
@@ -235,7 +245,7 @@ def delete_import(import_id: str, _admin: str = Depends(require_admin), db: Sess
 
 
 @router.get("/unmatched/", response_model=list[UnmatchedRecordOut])
-def list_unmatched(status: str = "pending", db: Session = Depends(get_db)):
+def list_unmatched(status: str = "pending", _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     q = db.query(UnmatchedRecord)
     if status:
         q = q.filter(UnmatchedRecord.status == status)

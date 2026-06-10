@@ -10,6 +10,14 @@ class Settings(BaseSettings):
     admin_password: str = ""  # master admin password, bypasses email OTP
     session_expiry_hours: int = 72
     auth_code_expiry_minutes: int = 10
+    auth_code_max_attempts: int = 5  # failed guesses before a code is invalidated
+
+    # Uploads
+    max_upload_mb: int = 50
+
+    # Run migrations/seeding in the app lifespan (disable when an entrypoint
+    # such as `python -m app.startup` already ran them, e.g. in Docker)
+    auto_migrate: bool = True
 
     # SMTP (optional — codes logged to console when not configured)
     smtp_host: str = ""

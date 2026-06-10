@@ -27,6 +27,7 @@ def list_houses(
     property_type: str = Query(None),
     limit: int = Query(100, le=500),
     offset: int = Query(0),
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     q = db.query(MasterHouse)
@@ -47,6 +48,7 @@ def houses_for_map(
     max_lat: float = Query(...),
     max_lon: float = Query(...),
     limit: int = Query(500, le=5000),
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return houses for the map popup view — only the columns the frontend needs."""
@@ -89,6 +91,7 @@ def houses_dots_fast(
     max_lat: float = Query(...),
     max_lon: float = Query(...),
     limit: int = Query(500, le=10000),
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Lightweight endpoint returning only id, lat, lon for fast map rendering."""
@@ -110,6 +113,7 @@ def houses_dots_fast(
 @router.get("/streets")
 def list_streets(
     zip_code: str = Query(...),
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return streets in a ZIP with their house coordinates for map display."""
@@ -141,7 +145,7 @@ def list_streets(
 
 
 @router.get("/zip-codes")
-def list_zip_codes(db: Session = Depends(get_db)):
+def list_zip_codes(_admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Return all distinct ZIP codes that have houses with coordinates."""
     rows = (
         db.query(MasterHouse.zip_code, func.count(MasterHouse.id))
@@ -254,7 +258,7 @@ def houses_in_polygon(body: PolygonQueryRequest, _admin: str = Depends(require_a
 
 
 @router.get("/{house_id}", response_model=MasterHouseOut)
-def get_house(house_id: str, db: Session = Depends(get_db)):
+def get_house(house_id: str, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     house = db.query(MasterHouse).filter(MasterHouse.id == house_id).first()
     if not house:
         raise HTTPException(404, "House not found")

@@ -9,7 +9,10 @@ function esc(s) {
 }
 
 // --- Auth ---
-let _authToken = localStorage.getItem("scoutmap_token") || "";
+// The session lives in an HttpOnly cookie set by the server; the token is
+// kept in memory only (never localStorage) so XSS can't steal it.
+let _authToken = "";
+localStorage.removeItem("scoutmap_token"); // clean up legacy storage
 
 function _authHeaders() {
   const h = { "Content-Type": "application/json" };
@@ -54,7 +57,6 @@ function _flashStatus(msg, duration) {
 }
 
 async function _checkAuth() {
-  if (!_authToken) { _showLogin(); return; }
   try {
     const r = await authFetch(API + "/api/auth/me");
     if (r.ok) {
@@ -63,7 +65,6 @@ async function _checkAuth() {
       document.getElementById("settings-user-email").textContent = data.email;
     } else {
       _authToken = "";
-      localStorage.removeItem("scoutmap_token");
       _showLogin();
     }
   } catch {
@@ -96,7 +97,6 @@ async function loginAdminPassword() {
     const data = await r.json();
     if (r.ok && data.token) {
       _authToken = data.token;
-      localStorage.setItem("scoutmap_token", _authToken);
       _hideLogin();
       document.getElementById("settings-user-email").textContent = data.email;
       loadDashboard();
@@ -173,7 +173,6 @@ async function loginVerifyCode() {
     const data = await r.json();
     if (r.ok && data.token) {
       _authToken = data.token;
-      localStorage.setItem("scoutmap_token", _authToken);
       _hideLogin();
       document.getElementById("settings-user-email").textContent = data.email;
       loadDashboard();
@@ -196,7 +195,6 @@ function loginBackToEmail() {
 async function appLogout() {
   try { await authFetch(API + "/api/auth/logout", { method: "POST" }); } catch { /* ok */ }
   _authToken = "";
-  localStorage.removeItem("scoutmap_token");
   _showLogin();
   document.getElementById("login-step-admin").style.display = "";
   document.getElementById("login-step-email").style.display = "none";
@@ -1559,7 +1557,7 @@ document.getElementById("walk-group-form").onsubmit = async (e) => {
     const data = await r.json();
     if (r.ok && data.groups?.length) {
       resultEl.innerHTML = `<strong>${data.groups.length} groups created (${data.total_assigned} houses)</strong>` +
-        `<ul>` + data.groups.map(g => `<li>${g.label} — ${g.houses} houses</li>`).join("") + `</ul>`;
+        `<ul>` + data.groups.map(g => `<li>${esc(g.label)} — ${esc(g.houses)} houses</li>`).join("") + `</ul>`;
       loadWalkGroupList();
     } else if (r.ok) {
       resultEl.textContent = data.message || "No houses assigned to this event yet.";
@@ -1578,7 +1576,7 @@ async function loadWalkGroupList() {
   try {
     const r = await authFetch(API + `/api/events/${currentEventId}/houses`);
     if (!r.ok) {
-      el.innerHTML = `<p>Failed to load groups (HTTP ${r.status}).</p>`;
+      el.innerHTML = `<p>Failed to load groups (HTTP ${esc(r.status)}).</p>`;
       return;
     }
     const houses = await r.json();
@@ -1589,7 +1587,7 @@ async function loadWalkGroupList() {
     }
     el.innerHTML = _renderGroupedHouses(houses);
   } catch (err) {
-    el.innerHTML = `<p>Error loading groups: ${err.message}</p>`;
+    el.innerHTML = `<p>Error loading groups: ${esc(err.message)}</p>`;
   }
 }
 

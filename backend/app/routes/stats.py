@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.database import get_db
+from app.routes.auth import require_admin
 from app.schemas import DashboardStats
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
@@ -29,7 +30,7 @@ SELECT
 
 
 @router.get("/", response_model=DashboardStats)
-def dashboard(db: Session = Depends(get_db)):
+def dashboard(_admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     row = db.execute(_STATS_SQL).one()
     return DashboardStats(
         total_houses=row.total_houses or 0,

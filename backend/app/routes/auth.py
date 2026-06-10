@@ -10,7 +10,7 @@ from email.mime.text import MIMEText
 from fnmatch import fnmatch
 from random import SystemRandom
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,39 @@ from app.models import AllowedEmail, AuthCode, AuthSession, ScoutRoster
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 _rng = SystemRandom()
+
+SESSION_COOKIE = "scoutmap_token"
+
+
+def hash_token(token: str) -> str:
+    """Sessions store only the SHA-256 of the bearer token, so a DB leak
+    doesn't yield replayable credentials."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _set_session_cookie(response: Response, request: Request, token: str):
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=settings.session_expiry_hours * 3600,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+        path="/",
+    )
+
+
+def _create_session(db: Session, email: str, request: Request, response: Response) -> str:
+    """Create a session row (hashed token) and set the HttpOnly cookie."""
+    token = secrets.token_hex(32)
+    db.add(AuthSession(
+        token=hash_token(token),
+        email=email,
+        expires_at=datetime.utcnow() + timedelta(hours=settings.session_expiry_hours),
+    ))
+    db.commit()
+    _set_session_cookie(response, request, token)
+    return token
 
 
 # ---------------------------------------------------------------------------
@@ -55,8 +88,13 @@ def _generate_code() -> str:
     return "".join(str(_rng.randint(0, 9)) for _ in range(6))
 
 
-def _send_code_email(email: str, code: str):
-    """Send the OTP code via SMTP, or log it if SMTP is not configured."""
+def _send_code_email(email: str, code: str) -> bool:
+    """Send the OTP code via SMTP. Returns True on success.
+
+    Without SMTP configured (development only), the code is logged so the
+    operator can complete a login. With SMTP configured, the code is never
+    written to logs.
+    """
     subject = f"ScoutMap Login Code: {code}"
     body = (
         f"Your ScoutMap verification code is:\n\n"
@@ -67,7 +105,7 @@ def _send_code_email(email: str, code: str):
 
     if not settings.smtp_host:
         logger.warning("SMTP not configured — login code for %s: %s", email, code)
-        return
+        return True
 
     msg = MIMEText(body)
     msg["Subject"] = subject
@@ -85,8 +123,10 @@ def _send_code_email(email: str, code: str):
         server.sendmail(settings.smtp_from, [email], msg.as_string())
         server.quit()
         logger.info("Sent login code to %s", email)
+        return True
     except Exception:
-        logger.exception("Failed to send email to %s — code: %s", email, code)
+        logger.exception("Failed to send login email to %s", email)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +158,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> str:
         raise HTTPException(401, "Not authenticated")
 
     session = db.query(AuthSession).filter(
-        AuthSession.token == token,
+        AuthSession.token == hash_token(token),
         AuthSession.expires_at > datetime.utcnow(),
     ).first()
     if not session:
@@ -198,18 +238,19 @@ def request_code(body: RequestCodeBody, request: Request, db: Session = Depends(
     code = _generate_code()
     auth_code = AuthCode(
         email=email,
-        code=code,
+        code=_hash_password(code),
         expires_at=datetime.utcnow() + timedelta(minutes=settings.auth_code_expiry_minutes),
     )
     db.add(auth_code)
     db.commit()
 
-    _send_code_email(email, code)
+    if not _send_code_email(email, code):
+        raise HTTPException(502, "Could not send the login email. Please try again or contact the administrator.")
     return {"ok": True, "message": "If this email is authorized, a code has been sent."}
 
 
 @router.post("/verify-code")
-def verify_code(body: VerifyCodeBody, request: Request, db: Session = Depends(get_db)):
+def verify_code(body: VerifyCodeBody, request: Request, response: Response, db: Session = Depends(get_db)):
     """Verify the OTP code and create a session."""
     _check_rate_limit(f"verify:{request.client.host}")
     email = body.email.strip().lower()
@@ -217,26 +258,22 @@ def verify_code(body: VerifyCodeBody, request: Request, db: Session = Depends(ge
 
     auth_code = db.query(AuthCode).filter(
         AuthCode.email == email,
-        AuthCode.code == code,
         AuthCode.used == False,  # noqa: E712
         AuthCode.expires_at > datetime.utcnow(),
-    ).first()
+    ).order_by(AuthCode.created_at.desc()).first()
 
     if not auth_code:
         raise HTTPException(401, "Invalid or expired code")
 
+    if not _verify_password(code, auth_code.code):
+        auth_code.attempts = (auth_code.attempts or 0) + 1
+        if auth_code.attempts >= settings.auth_code_max_attempts:
+            auth_code.used = True  # burn the code after too many wrong guesses
+        db.commit()
+        raise HTTPException(401, "Invalid or expired code")
+
     auth_code.used = True
-
-    # Create session
-    token = secrets.token_hex(32)
-    session = AuthSession(
-        token=token,
-        email=email,
-        expires_at=datetime.utcnow() + timedelta(hours=settings.session_expiry_hours),
-    )
-    db.add(session)
-    db.commit()
-
+    token = _create_session(db, email, request, response)
     return {"ok": True, "token": token, "email": email}
 
 
@@ -248,7 +285,7 @@ class AdminLoginBody(BaseModel):
 
 
 @router.post("/admin-login")
-def admin_login(body: AdminLoginBody, request: Request, db: Session = Depends(get_db)):
+def admin_login(body: AdminLoginBody, request: Request, response: Response, db: Session = Depends(get_db)):
     """Authenticate with the master admin password."""
     _check_rate_limit(f"admin:{request.client.host}")
     if not settings.admin_password:
@@ -257,32 +294,26 @@ def admin_login(body: AdminLoginBody, request: Request, db: Session = Depends(ge
     if not secrets.compare_digest(body.password, settings.admin_password):
         raise HTTPException(401, "Incorrect password")
 
-    token = secrets.token_hex(32)
-    session = AuthSession(
-        token=token,
-        email="admin",
-        expires_at=datetime.utcnow() + timedelta(hours=settings.session_expiry_hours),
-    )
-    db.add(session)
-    db.commit()
-
+    token = _create_session(db, "admin", request, response)
     return {"ok": True, "token": token, "email": "admin"}
 
 
 @router.post("/logout")
-def logout(request: Request, db: Session = Depends(get_db)):
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     """Invalidate the current session."""
     token = None
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
     if not token:
-        token = request.cookies.get("scoutmap_token")
+        token = request.cookies.get(SESSION_COOKIE)
     if token:
-        db.query(AuthSession).filter(AuthSession.token == token).delete()
+        hashed = hash_token(token)
+        db.query(AuthSession).filter(AuthSession.token == hashed).delete()
         db.commit()
         from app.main import invalidate_session_cache
-        invalidate_session_cache(token)
+        invalidate_session_cache(hashed)
+    response.delete_cookie(SESSION_COOKIE, path="/")
     return {"ok": True}
 
 
@@ -379,7 +410,7 @@ def public_scout_roster(db: Session = Depends(get_db)):
 
 
 @router.post("/scout-login")
-def scout_login(body: ScoutLoginBody, request: Request, db: Session = Depends(get_db)):
+def scout_login(body: ScoutLoginBody, request: Request, response: Response, db: Session = Depends(get_db)):
     """Authenticate a scout by roster ID + password. Returns a session token."""
     _check_rate_limit(f"scout:{request.client.host}")
     scout = db.query(ScoutRoster).filter(
@@ -393,15 +424,7 @@ def scout_login(body: ScoutLoginBody, request: Request, db: Session = Depends(ge
     if not _verify_password(body.password, scout.password_hash):
         raise HTTPException(401, "Incorrect password")
 
-    token = secrets.token_hex(32)
-    session = AuthSession(
-        token=token,
-        email=f"scout:{scout.id}",  # tag session as scout-type
-        expires_at=datetime.utcnow() + timedelta(hours=settings.session_expiry_hours),
-    )
-    db.add(session)
-    db.commit()
-
+    token = _create_session(db, f"scout:{scout.id}", request, response)
     return {
         "ok": True,
         "token": token,
@@ -435,6 +458,8 @@ def set_scout_password(
     # Invalidate existing sessions for this scout
     db.query(AuthSession).filter(AuthSession.email == f"scout:{roster_id}").delete()
     db.commit()
+    from app.main import invalidate_sessions_for_email
+    invalidate_sessions_for_email(f"scout:{roster_id}")
     return {"ok": True, "name": scout.name}
 
 
@@ -451,4 +476,6 @@ def clear_scout_password(
     scout.password_hash = None
     db.query(AuthSession).filter(AuthSession.email == f"scout:{roster_id}").delete()
     db.commit()
+    from app.main import invalidate_sessions_for_email
+    invalidate_sessions_for_email(f"scout:{roster_id}")
     return {"ok": True}

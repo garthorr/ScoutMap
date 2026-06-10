@@ -1,3 +1,5 @@
 __pycache__/
 *.db
 backend/server.log
+.env
+.venv/
