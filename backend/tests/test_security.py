@@ -106,3 +106,35 @@ def test_correct_code_still_logs_in(client, db):
     client.post("/api/auth/verify-code", json={"email": email, "code": "000000"})
     r = client.post("/api/auth/verify-code", json={"email": email, "code": "123456"})
     assert r.status_code == 200 and r.json()["token"]
+
+
+def test_allowlist_exact_and_wildcard(db):
+    db.add_all([AllowedEmail(email="a@example.com"), AllowedEmail(email="*@troop.org")])
+    db.commit()
+    assert auth._is_email_allowed("A@Example.com", db)
+    assert auth._is_email_allowed("leader@troop.org", db)
+    assert not auth._is_email_allowed("x@other.com", db)
+
+
+def test_scout_data_paging(client, db):
+    from app.models import EventHouse, FundraiserEvent, MasterHouse, Visit
+    ev = FundraiserEvent(name="Spring")
+    house = MasterHouse(normalized_address="1 MAIN ST", full_address="1 Main St")
+    db.add_all([ev, house])
+    db.flush()
+    eh = EventHouse(event_id=ev.id, house_id=house.id)
+    db.add(eh)
+    db.flush()
+    db.add_all([Visit(event_house_id=eh.id, scout_name=f"S{i}") for i in range(5)])
+    db.commit()
+    headers = _session(db, "admin")
+    try:
+        page1 = client.get("/api/scout/data?limit=3", headers=headers).json()
+        page2 = client.get("/api/scout/data?limit=3&offset=3", headers=headers).json()
+        assert len(page1) == 3 and len(page2) == 2
+        assert page1[0]["address"] == "1 Main St" and page1[0]["event_name"] == "Spring"
+        assert not {v["id"] for v in page1} & {v["id"] for v in page2}
+    finally:
+        for m in (Visit, EventHouse, MasterHouse, FundraiserEvent):
+            db.query(m).delete()
+        db.commit()

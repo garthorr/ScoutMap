@@ -14,4 +14,6 @@ ENV PYTHONPATH=/app/backend
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers", "--forwarded-allow-ips", "*", "--log-level", "warning"]
+# Run migrations/seeding once, then start a single worker (1-CPU host;
+# one worker also keeps the in-memory session cache and rate limiter consistent)
+CMD ["sh", "-c", "python -m app.startup && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips '*' --log-level warning"]

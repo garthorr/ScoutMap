@@ -1,7 +1,9 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -10,11 +12,11 @@ from pathlib import Path
 
 
 from app.config import settings
-from app.database import engine, Base, get_db
 from app.routes import imports, houses, events, stats, arcgis, scout
-from app.routes.auth import router as auth_router, get_current_user
-from app.routes.form_fields import router as form_fields_router, seed_default_fields
-from app.models import AllowedEmail, AuthSession
+from app.routes.auth import router as auth_router
+from app.routes.form_fields import router as form_fields_router
+from app.models import AuthSession
+from app.startup import cleanup_expired_sessions
 
 import json
 
@@ -75,96 +77,26 @@ def invalidate_session_cache(token: str):
     """Call on logout to immediately remove a token from cache."""
     _SESSION_CACHE.pop(token, None)
 
-# In production, migrations should be run via 'alembic upgrade head'
-# For convenience in development/simple deployments, we can trigger it programmatically
-def _run_migrations():
-    import os
-    from alembic import command
-    from alembic.config import Config
-
-    # Path to alembic.ini relative to this file
-    base_dir = Path(__file__).resolve().parent.parent
-    ini_path = base_dir / "alembic.ini"
-
-    if ini_path.exists():
-        logger.info("Running database migrations...")
-        alembic_cfg = Config(str(ini_path))
-        alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
-        alembic_cfg.set_main_option("script_location", str(base_dir / "migrations"))
-        from sqlalchemy import inspect, text
-        with engine.connect() as conn:
-            tables = inspect(engine).get_table_names()
-            has_version = "alembic_version" in tables
-            has_app_tables = "allowed_emails" in tables
-            if not has_version and has_app_tables:
-                # Tables exist but were created outside Alembic — stamp to avoid re-running migrations
-                logger.warning("Tables exist without alembic_version — stamping as head")
-                conn.execute(text("CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(32) NOT NULL, CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"))
-                conn.execute(text("INSERT INTO alembic_version VALUES ('e662a51ab537')"))
-                conn.commit()
-        command.upgrade(alembic_cfg, "head")
-    else:
-        logger.warning("alembic.ini not found at %s, skipping migrations", ini_path)
-        Base.metadata.create_all(bind=engine, checkfirst=True)
-
-_run_migrations()
+# How often to purge expired sessions / login codes while running
+_CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
 
 
-def _seed_allowed_emails():
-    """Seed allowed emails from ALLOWED_EMAILS env var if table is empty."""
-    if not settings.allowed_emails:
-        return
-    from app.database import SessionLocal
-    db = SessionLocal()
-    try:
-        if db.query(AllowedEmail).count() > 0:
-            return  # already seeded
-        for raw in settings.allowed_emails.split(","):
-            email = raw.strip().lower()
-            if email:
-                db.add(AllowedEmail(email=email))
-                logger.info("Seeded allowed email: %s", email)
-        db.commit()
-    finally:
-        db.close()
+async def _periodic_cleanup():
+    while True:
+        await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)
+        # Run the blocking DB work in a thread so requests aren't held up
+        await asyncio.to_thread(cleanup_expired_sessions)
 
 
-_seed_allowed_emails()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Migrations and seeding run once beforehand via `python -m app.startup`
+    task = asyncio.create_task(_periodic_cleanup())
+    yield
+    task.cancel()
 
 
-def _seed_form_fields():
-    from app.database import SessionLocal
-    db = SessionLocal()
-    try:
-        seed_default_fields(db)
-    finally:
-        db.close()
-
-
-_seed_form_fields()
-
-
-def _cleanup_expired_sessions():
-    """Remove expired sessions and auth codes from the database."""
-    from app.database import SessionLocal
-    from app.models import AuthCode
-    db = SessionLocal()
-    try:
-        now = datetime.utcnow()
-        expired_sessions = db.query(AuthSession).filter(AuthSession.expires_at < now).delete(synchronize_session=False)
-        expired_codes = db.query(AuthCode).filter(AuthCode.expires_at < now).delete(synchronize_session=False)
-        if expired_sessions or expired_codes:
-            db.commit()
-            logger.info("Cleaned up %d expired sessions, %d expired auth codes", expired_sessions, expired_codes)
-    except Exception:
-        db.rollback()
-    finally:
-        db.close()
-
-
-_cleanup_expired_sessions()
-
-app = FastAPI(title=settings.app_title)
+app = FastAPI(title=settings.app_title, lifespan=lifespan)
 
 # Public paths that don't require authentication
 _PUBLIC_PATHS = {

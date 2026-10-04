@@ -2037,19 +2037,30 @@ async function loadScoutDataEvents() {
 }
 
 let _scoutDataCache = [];
+let _scoutDataTotal = 0;
+const SCOUT_DATA_PAGE = 500;
+
+function _scoutDataUrl(offset) {
+  const eventId = document.getElementById("sd-event-filter").value;
+  const params = new URLSearchParams({ limit: SCOUT_DATA_PAGE, offset });
+  if (eventId) params.set("event_id", eventId);
+  return API + "/api/scout/data?" + params;
+}
+
 async function loadScoutData() {
   document.getElementById("scout-summary").innerHTML = '<div class="loading-bar"></div>';
   document.getElementById("scout-data-list").innerHTML = '<div class="loading-bar"></div>';
   const eventId = document.getElementById("sd-event-filter").value;
-  const params = eventId ? "?event_id=" + eventId : "";
+  const params = eventId ? "?event_id=" + encodeURIComponent(eventId) : "";
 
   const [dataR, summaryR] = await Promise.all([
-    authFetch(API + "/api/scout/data" + params),
+    authFetch(_scoutDataUrl(0)),
     authFetch(API + "/api/scout/data/summary" + params),
   ]);
   const data = await dataR.json();
   const summary = await summaryR.json();
   _scoutDataCache = data;
+  _scoutDataTotal = summary.total_visits;
 
   // Summary table
   const sumEl = document.getElementById("scout-summary");
@@ -2071,7 +2082,24 @@ async function loadScoutData() {
     sumEl.innerHTML = "<p>No scout data yet.</p>";
   }
 
-  // Detail table
+  renderScoutDataList();
+}
+
+// Fetch the next page of visits from the server and append it
+async function _fetchMoreScoutData() {
+  const r = await authFetch(_scoutDataUrl(_scoutDataCache.length));
+  const page = await r.json();
+  _scoutDataCache = _scoutDataCache.concat(page);
+  return page.length;
+}
+
+async function loadMoreScoutData() {
+  await _fetchMoreScoutData();
+  renderScoutDataList();
+}
+
+function renderScoutDataList() {
+  const data = _scoutDataCache;
   const listEl = document.getElementById("scout-data-list");
   if (data.length) {
     listEl.innerHTML = `<table><tr><th>Time</th><th>Scout</th><th>Address</th><th>Group</th><th>Door</th><th>Donation</th><th>Amount</th><th>Former</th><th>Avoid</th><th>Notes</th></tr>` +
@@ -2086,13 +2114,21 @@ async function loadScoutData() {
         <td>${v.former_scout == null ? "—" : v.former_scout ? "Yes" : "No"}</td>
         <td>${v.avoid_house ? "YES" : "—"}</td>
         <td>${esc(v.notes)}</td>
-      </tr>`).join("") + `</table>`;
+      </tr>`).join("") + `</table>` +
+      (data.length < _scoutDataTotal
+        ? `<p>Showing ${data.length} of ${_scoutDataTotal} visits. <button class="btn-sm" onclick="loadMoreScoutData()">Load more</button></p>`
+        : "");
   } else {
     listEl.innerHTML = "<p>No visit data yet. Scouts record data at <a href='/scout' target='_blank'>/scout</a>.</p>";
   }
 }
 
-function exportScoutDataCSV() {
+async function exportScoutDataCSV() {
+  // Export everything, not just the pages shown on screen
+  while (_scoutDataCache.length < _scoutDataTotal) {
+    if (!(await _fetchMoreScoutData())) break;
+  }
+  renderScoutDataList();
   if (!_scoutDataCache.length) { alert("No data to export."); return; }
   exportCSV("scout-data.csv",
     ["Time", "Scout", "Scout ID", "Event", "Group", "Address", "ZIP", "Door Answer", "Donation", "Amount", "Former Scout", "Avoid House", "Notes"],

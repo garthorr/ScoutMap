@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, contains_eager, joinedload
 from sqlalchemy import func, case
 from typing import Optional
 
@@ -183,7 +183,7 @@ def list_group_houses(
     houses = (
         db.query(EventHouse)
         .join(MasterHouse, EventHouse.house_id == MasterHouse.id)
-        .options(joinedload(EventHouse.house), joinedload(EventHouse.visits))
+        .options(contains_eager(EventHouse.house), joinedload(EventHouse.visits))
         .filter(
             EventHouse.event_id == event_id,
             EventHouse.assigned_to == group,
@@ -220,25 +220,31 @@ def list_group_houses(
 @router.get("/data")
 def scout_data(
     event_id: Optional[str] = None,
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
     _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Return all visit data entered by scouts, with house/event info."""
+    """Return one page of visit data entered by scouts, newest first.
+
+    The summary endpoint's total_visits is the full count for paging.
+    """
     q = (
         db.query(Visit)
         .join(EventHouse, Visit.event_house_id == EventHouse.id)
         .join(MasterHouse, EventHouse.house_id == MasterHouse.id)
         .join(FundraiserEvent, EventHouse.event_id == FundraiserEvent.id)
+        # Reuse the joins above instead of joining the same tables again
         .options(
-            joinedload(Visit.event_house).joinedload(EventHouse.house),
-            joinedload(Visit.event_house).joinedload(EventHouse.event),
+            contains_eager(Visit.event_house).contains_eager(EventHouse.house),
+            contains_eager(Visit.event_house).contains_eager(EventHouse.event),
         )
         .filter(Visit.scout_name.isnot(None))
     )
     if event_id:
         q = q.filter(EventHouse.event_id == event_id)
 
-    visits = q.order_by(Visit.visited_at.desc()).all()
+    visits = q.order_by(Visit.visited_at.desc(), Visit.id).offset(offset).limit(limit).all()
     result = []
     for v in visits:
         result.append({

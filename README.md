@@ -302,6 +302,7 @@ To add a new public data source:
 export DATABASE_URL=postgresql://user:pass@localhost:5432/scoutmap
 cd backend
 pip install -r requirements.txt
+python -m app.startup        # migrations + seeding (run after pulling changes)
 uvicorn app.main:app --reload
 
 # Run with Docker

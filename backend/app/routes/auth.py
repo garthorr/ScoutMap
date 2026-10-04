@@ -41,14 +41,11 @@ class VerifyCodeBody(BaseModel):
 def _is_email_allowed(email: str, db: Session) -> bool:
     """Check if email matches any allowed pattern in the database."""
     email = email.strip().lower()
-    patterns = [row.email for row in db.query(AllowedEmail.email).all()]
-    for pattern in patterns:
-        p = pattern.strip().lower()
-        if p == email:
-            return True
-        if "*" in p and fnmatch(email, p):
-            return True
-    return False
+    # Exact match uses the index; only wildcard patterns need checking in Python
+    if db.query(AllowedEmail.id).filter(AllowedEmail.email == email).first():
+        return True
+    patterns = db.query(AllowedEmail.email).filter(AllowedEmail.email.contains("*")).all()
+    return any(fnmatch(email, row.email.strip().lower()) for row in patterns)
 
 
 def _short_name(name: str) -> str:

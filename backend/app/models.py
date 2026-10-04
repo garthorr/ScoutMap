@@ -141,7 +141,7 @@ class EventHouse(Base):
 
     event = relationship("FundraiserEvent", back_populates="event_houses")
     house = relationship("MasterHouse", back_populates="event_houses")
-    visits = relationship("Visit", back_populates="event_house")
+    visits = relationship("Visit", back_populates="event_house", order_by="Visit.visited_at")
 
     __table_args__ = (
         UniqueConstraint("event_id", "house_id", name="uq_event_house"),
