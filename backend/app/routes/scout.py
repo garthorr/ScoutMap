@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import re
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -13,11 +14,16 @@ from typing import Optional
 
 from app.database import get_db
 from app.models import (
-    FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster,
+    AuthSession, FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster,
 )
-from app.routes.auth import _hash_password, _short_name, get_current_user, require_admin
+from app.routes.auth import _short_names, get_current_user, new_scout_password, require_admin
 
 router = APIRouter(prefix="/api/scout", tags=["scout"])
+
+
+def natural_key(label: str) -> list:
+    """Sort key so "Group 2" comes before "Group 10"."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", label or "")]
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +40,7 @@ class RosterOut(BaseModel):
     scout_id: Optional[str] = None
     active: bool = True
     has_password: bool = False
+    password: Optional[str] = None  # only filled in right after it's generated
 
     class Config:
         from_attributes = True
@@ -50,21 +57,25 @@ def list_roster(
     q = db.query(ScoutRoster)
     if active_only:
         q = q.filter(ScoutRoster.active == True)  # noqa: E712
+    scouts = q.order_by(ScoutRoster.name).all()
+    names = _short_names([s.name for s in scouts]) if is_scout else [s.name for s in scouts]
     return [
-        RosterOut(id=str(s.id), name=_short_name(s.name) if is_scout else s.name,
+        RosterOut(id=str(s.id), name=name,
                   scout_id=None if is_scout else s.scout_id, active=s.active,
                   has_password=bool(s.password_hash))
-        for s in q.order_by(ScoutRoster.name).all()
+        for s, name in zip(scouts, names)
     ]
 
 
 @router.post("/roster", response_model=RosterOut)
 def add_scout(body: RosterCreate, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
-    s = ScoutRoster(name=body.name, scout_id=body.scout_id)
+    s = ScoutRoster(name=body.name.strip(), scout_id=body.scout_id)
     db.add(s)
+    db.flush()  # assigns s.id
+    password = new_scout_password(s, db)
     db.commit()
-    db.refresh(s)
-    return RosterOut(id=str(s.id), name=s.name, scout_id=s.scout_id, active=s.active)
+    return RosterOut(id=str(s.id), name=s.name, scout_id=s.scout_id, active=s.active,
+                     has_password=True, password=password)
 
 
 @router.delete("/roster/{roster_id}")
@@ -86,6 +97,7 @@ async def import_roster_csv(file: UploadFile = File(...), _admin: str = Depends(
       scout_id — Scout ID number (optional)
 
     Extra columns are ignored. Duplicate names (case-insensitive) are skipped.
+    Each new scout gets a random 6-digit password, returned once in the response.
     """
     content = await file.read()
     text = content.decode("utf-8-sig")  # handle BOM from Excel
@@ -109,7 +121,7 @@ async def import_roster_csv(file: UploadFile = File(...), _admin: str = Depends(
         if s.name
     }
 
-    added = 0
+    added = []
     skipped = 0
     for row in reader:
         name = (row.get("name") or "").strip()
@@ -121,12 +133,14 @@ async def import_roster_csv(file: UploadFile = File(...), _admin: str = Depends(
             continue
 
         scout_id = (row.get("scout_id") or row.get("id") or "").strip() or None
-        db.add(ScoutRoster(name=name, scout_id=scout_id))
+        scout = ScoutRoster(name=name, scout_id=scout_id)
+        db.add(scout)
+        db.flush()  # assigns scout.id
+        added.append({"name": name, "password": new_scout_password(scout, db)})
         existing.add(name.lower())
-        added += 1
 
     db.commit()
-    return {"added": added, "skipped": skipped}
+    return {"added": len(added), "skipped": skipped, "passwords": added}
 
 
 @router.patch("/roster/{roster_id}")
@@ -135,6 +149,9 @@ def toggle_scout(roster_id: str, _admin: str = Depends(require_admin), db: Sessi
     if not s:
         raise HTTPException(404, "Scout not found")
     s.active = not s.active
+    if not s.active:
+        # Deactivating signs the scout out everywhere
+        db.query(AuthSession).filter(AuthSession.email == f"scout:{s.id}").delete()
     db.commit()
     return {"id": str(s.id), "active": s.active}
 
@@ -167,7 +184,7 @@ def list_scout_events(db: Session = Depends(get_db)):
             "id": str(ev.id),
             "name": ev.name,
             "event_date": ev.event_date.isoformat() if ev.event_date else None,
-            "groups": sorted(groups_by_event.get(ev.id, [])),
+            "groups": sorted(groups_by_event.get(ev.id, []), key=natural_key),
         }
         for ev in events
     ]

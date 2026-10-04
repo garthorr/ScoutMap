@@ -164,6 +164,39 @@ h3 {
   flex-shrink: 0;
 }
 
+/* --- Dashboard checklist --- */
+.checklist { list-style: none; margin-top: 14px; }
+.checklist li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.checklist li:last-child { border-bottom: none; }
+.checklist li.next { background: #fff8e6; border-radius: var(--radius); }
+.check-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-weight: 700;
+  color: var(--sa-pale-gray);
+  border: 2px solid var(--border);
+  background: var(--sa-white);
+}
+.checklist li.done .check-icon { background: #059669; border-color: #059669; color: var(--sa-white); }
+.checklist li.next .check-icon { border-color: var(--sa-red); color: var(--sa-red); }
+.check-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.check-title { font-weight: 600; }
+.checklist li.done .check-title { color: var(--sa-gray); }
+.check-detail { font-size: 13px; color: var(--sa-gray); word-break: break-word; }
+.btn-sm.btn-quiet { background: var(--sa-pale-gray); }
+.btn-sm.btn-quiet:hover { background: var(--sa-gray); }
+
 /* --- Phase dashboard --- */
 .phase-row {
   display: flex;
@@ -744,7 +777,7 @@ details[open] summary {
 /* --- Print --- */
 @media print {
   #navbar, .inline-form, button, .modal, #app-footer { display: none !important; }
-  .page { display: block !important; }
+  .page.active { display: block !important; }
   main { box-shadow: none; border: none; margin: 0; padding: 16px; }
   .card { box-shadow: none; border: 1px solid #ccc; page-break-inside: avoid; }
 }

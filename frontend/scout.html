@@ -265,7 +265,7 @@
           </div>
           <div class="field">
             <label for="login-scout-password">Password</label>
-            <input id="login-scout-password" type="password" placeholder="Enter your password" autocomplete="current-password" />
+            <input id="login-scout-password" type="password" placeholder="6-digit password" autocomplete="current-password" inputmode="numeric" maxlength="6" pattern="[0-9]*" />
           </div>
           <button class="btn" id="login-scout-btn" onclick="scoutPasswordLogin()">Sign In</button>
           <p id="login-scout-error" class="error-msg" style="display:none"></p>

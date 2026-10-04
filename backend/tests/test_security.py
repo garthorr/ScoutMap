@@ -4,42 +4,14 @@ Uses the app's real SessionLocal (the auth middleware queries it directly),
 so run with a throwaway DATABASE_URL, e.g. sqlite:///./test.db
 """
 
-import secrets
 import uuid
 from datetime import datetime, timedelta
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app.database import SessionLocal
-from app.main import app
-from app.models import AllowedEmail, AuthCode, AuthSession, ScoutRoster
+from app.models import AllowedEmail, AuthCode, ScoutRoster
 from app.routes import auth
-
-
-@pytest.fixture
-def db():
-    s = SessionLocal()
-    yield s
-    for model in (AuthSession, AuthCode, AllowedEmail, ScoutRoster):
-        s.query(model).delete()
-    s.commit()
-    s.close()
-
-
-@pytest.fixture
-def client():
-    auth._rate_limit_store.clear()
-    with TestClient(app) as c:
-        yield c
-
-
-def _session(db, email):
-    token = secrets.token_hex(32)
-    db.add(AuthSession(token=token, email=email,
-                       expires_at=datetime.utcnow() + timedelta(hours=1)))
-    db.commit()
-    return {"Authorization": f"Bearer {token}"}
+from conftest import _session
 
 
 def _scout(db, name="Jane Doe"):

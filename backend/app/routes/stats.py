@@ -1,10 +1,13 @@
 """Dashboard statistics endpoint."""
 
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import case, func, text
 
 from app.database import get_db
+from app.models import EventHouse, FundraiserEvent, ScoutRoster, Visit
 from app.schemas import DashboardStats
 from app.routes.auth import require_admin
 
@@ -44,3 +47,49 @@ def dashboard(db: Session = Depends(get_db)):
         assigned_houses=row.assigned_houses or 0,
         houses_visited=row.houses_visited or 0,
     )
+
+
+@router.get("/checklist")
+def checklist(event_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Progress numbers for one event, used by the dashboard's step-by-step checklist."""
+    if not db.query(FundraiserEvent.id).filter(FundraiserEvent.id == event_id).first():
+        raise HTTPException(404, "Event not found")
+
+    has_group = case((func.coalesce(EventHouse.assigned_to, "") != "", 1))
+    houses, grouped, groups = (
+        db.query(
+            func.count(EventHouse.id),
+            func.count(has_group),
+            func.count(func.distinct(func.nullif(EventHouse.assigned_to, ""))),
+        )
+        .filter(EventHouse.event_id == event_id)
+        .one()
+    )
+    visits, houses_visited, donations = (
+        db.query(
+            func.count(Visit.id),
+            func.count(func.distinct(Visit.event_house_id)),
+            func.coalesce(func.sum(Visit.donation_amount), 0),
+        )
+        .join(EventHouse, Visit.event_house_id == EventHouse.id)
+        .filter(EventHouse.event_id == event_id)
+        .one()
+    )
+    scouts_ready, scouts_no_password = (
+        db.query(
+            func.count(ScoutRoster.password_hash),
+            func.count(ScoutRoster.id) - func.count(ScoutRoster.password_hash),
+        )
+        .filter(ScoutRoster.active == True)  # noqa: E712
+        .one()
+    )
+    return {
+        "houses": houses,
+        "grouped": grouped,
+        "groups": groups,
+        "visits": visits,
+        "houses_visited": houses_visited,
+        "donations": float(donations or 0),
+        "scouts_ready": scouts_ready,
+        "scouts_no_password": scouts_no_password,
+    }
