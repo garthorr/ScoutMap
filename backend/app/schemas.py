@@ -90,7 +90,7 @@ class EventOut(BaseModel):
 class EventAssignRequest(BaseModel):
     zip_codes: Optional[list[str]] = None
     street_names: Optional[list[str]] = None
-    house_ids: Optional[list[str]] = None
+    house_ids: Optional[list[UUID]] = None
     limit: Optional[int] = None
     assigned_to: Optional[str] = None
 

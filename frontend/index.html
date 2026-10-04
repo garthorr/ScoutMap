@@ -44,24 +44,23 @@
     <div class="nav-inner">
       <h1>&#9884; ScoutMap</h1>
       <div class="nav-links">
-        <a href="#" onclick="showPage('dashboard', event)" class="active">Dashboard</a>
+        <a href="#" data-page="dashboard" onclick="showPage('dashboard', event)" class="active">Dashboard</a>
         <span class="nav-divider"></span>
-        <span class="nav-phase-label">Prepare</span>
-        <a href="#" onclick="showPage('events', event)">Events</a>
-        <a href="#" onclick="showPage('imports', event)">Import Data</a>
-        <a href="#" onclick="showPage('map', event)">Map</a>
-        <a href="#" onclick="showPage('roster', event)">Scouts</a>
-        <span class="nav-divider"></span>
-        <span class="nav-phase-label">Organize</span>
-        <a href="#" onclick="showPage('houses', event)">Houses</a>
-        <a href="#" onclick="showPage('walk-groups', event)">Walk Groups</a>
+        <span class="nav-phase-label">Plan</span>
+        <a href="#" data-page="events" onclick="showPage('events', event)">Events</a>
+        <a href="#" data-page="map" onclick="showPage('map', event)">Map</a>
+        <a href="#" data-page="roster" onclick="showPage('roster', event)">Scouts</a>
+        <a href="#" data-page="scout-form" onclick="showPage('scout-form', event)">Scout Form</a>
         <span class="nav-divider"></span>
         <span class="nav-phase-label">Collect</span>
-        <a href="#" onclick="showPage('scout-data', event)">Scout Data</a>
-        <a href="#" onclick="showPage('scout-form', event)">Scout Form</a>
-        <span class="nav-divider"></span>
-        <a href="#" onclick="showPage('settings', event)">Settings</a>
+        <a href="#" data-page="scout-data" onclick="showPage('scout-data', event)">Scout Data</a>
         <a href="/scout" target="_blank" style="border:1px solid var(--border);">Scout App</a>
+        <span class="nav-divider"></span>
+        <span class="nav-phase-label">Data</span>
+        <a href="#" data-page="houses" onclick="showPage('houses', event)">Houses</a>
+        <a href="#" data-page="imports" onclick="showPage('imports', event)">Import Data</a>
+        <span class="nav-divider"></span>
+        <a href="#" data-page="settings" onclick="showPage('settings', event)">Settings</a>
         <a href="#" onclick="appLogout()" style="color:var(--sa-pale-gray);">Log Out</a>
       </div>
     </div>
@@ -71,70 +70,39 @@
     <!-- Dashboard -->
     <section id="page-dashboard" class="page active">
       <h2>Dashboard</h2>
-
-      <div class="phase-row">
-        <div class="phase-block" data-phase="prepare">
-          <div class="phase-header">
-            <span class="phase-number">1</span>
-            <span class="phase-title">Prepare Data</span>
-          </div>
-          <div class="phase-stats" id="phase-prepare-stats"></div>
-          <div class="phase-links">
-            <a href="#" onclick="showPage('events', event)">Events</a>
-            <a href="#" onclick="showPage('imports', event)">Import Data</a>
-            <a href="#" onclick="showPage('roster', event)">Scouts</a>
-          </div>
+      <div class="card">
+        <div class="inline-form" style="gap:10px;align-items:center;">
+          <label for="dash-event-select" style="font-weight:600;">Event</label>
+          <select id="dash-event-select" style="min-width:220px;"></select>
         </div>
-
-        <div class="phase-arrow">&#8594;</div>
-
-        <div class="phase-block" data-phase="organize">
-          <div class="phase-header">
-            <span class="phase-number">2</span>
-            <span class="phase-title">Organize</span>
-          </div>
-          <div class="phase-stats" id="phase-organize-stats"></div>
-          <div class="phase-links">
-            <a href="#" onclick="showPage('map', event)">Map</a>
-            <a href="#" onclick="showPage('houses', event)">Houses</a>
-            <a href="#" onclick="showPage('walk-groups', event)">Walk Groups</a>
-          </div>
-        </div>
-
-        <div class="phase-arrow">&#8594;</div>
-
-        <div class="phase-block" data-phase="collect">
-          <div class="phase-header">
-            <span class="phase-number">3</span>
-            <span class="phase-title">Collect</span>
-          </div>
-          <div class="phase-stats" id="phase-collect-stats"></div>
-          <div class="phase-links">
-            <a href="#" onclick="showPage('scout-data', event)">Scout Data</a>
-            <a href="#" onclick="showPage('scout-form', event)">Scout Form</a>
-            <a href="/scout" target="_blank">Scout App</a>
-          </div>
-        </div>
+        <ol id="dash-checklist" class="checklist"></ol>
+      </div>
+      <div class="card">
+        <h3>All Events</h3>
+        <div id="dash-totals" class="phase-stats"></div>
       </div>
     </section>
 
     <!-- Map -->
     <section id="page-map" class="page">
-      <h2>House Map</h2>
+      <h2>Map</h2>
       <div class="card" style="margin-bottom:12px;">
-        <div class="inline-form" style="gap:10px;">
+        <div class="inline-form" style="gap:10px;align-items:center;">
+          <label for="map-event-select" style="font-weight:600;">Event</label>
+          <select id="map-event-select" style="min-width:200px;">
+            <option value="">Choose an event…</option>
+          </select>
           <span class="tooltip-wrap">
             <select id="map-zip-select" multiple style="min-width:180px;height:34px;">
             </select>
             <span class="tooltip">Select one or more imported ZIP codes to load on the map</span>
           </span>
-          <span class="tooltip-wrap">
-            <select id="map-event-select" style="min-width:160px;">
-              <option value="">Walk Groups: none</option>
-            </select>
-            <span class="tooltip">Show walk group routes on the map</span>
-          </span>
         </div>
+        <p class="help-text" style="margin:10px 0 0;">
+          <strong>1.</strong> Pick the event. <strong>2.</strong> Click <strong>Boundary</strong> and draw around the area to walk.
+          <strong>3.</strong> Click <strong>Add to event</strong> (or <strong>Import from ArcGIS</strong> if houses are missing — it adds them to the event too).
+          <strong>4.</strong> Click <strong>Make groups</strong> below the map.
+        </p>
       </div>
       <div id="map-toolbar" style="margin-bottom:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
         <button id="map-tool-pointer" class="btn-sm map-tool active" onclick="setMapTool('pointer')" title="Pan / select">Pointer</button>
@@ -151,29 +119,37 @@
         <span id="map-boundary-result" style="font-size:13px;color:var(--sa-dark-blue);margin-left:auto;display:none;flex-wrap:wrap;gap:4px;align-items:center;">
           <strong><span id="map-boundary-count">0</span> houses</strong> in boundary
           <span id="map-boundary-arcgis-count" style="color:var(--sa-gray);"></span>
-          <select id="map-boundary-event" style="font-size:13px;padding:2px 4px;">
-            <option value="">Select event…</option>
-          </select>
-          <input id="map-boundary-group" placeholder="Group label (optional)" style="width:140px;font-size:13px;padding:2px 6px;" />
-          <button class="btn-sm" onclick="boundaryAssignToEvent()">Assign</button>
+          <input id="map-boundary-group" placeholder="Group name (optional)" style="width:150px;font-size:13px;padding:2px 6px;" />
+          <button class="btn-sm" onclick="boundaryAssignToEvent()">Add to event</button>
           <button class="btn-sm btn-danger" onclick="boundaryDeleteHouses()" title="Delete all houses within this boundary">Delete</button>
           <button class="btn-sm" onclick="boundaryImportFromArcGIS()" style="background:#059669;" title="Fetch houses from ArcGIS within this boundary">Import from ArcGIS</button>
           <button class="btn-sm" onclick="clearBoundary()">Clear</button>
         </span>
         <span id="map-box-selected" style="font-size:13px;color:var(--sa-dark-blue);margin-left:auto;display:none;">
           <span id="map-box-count">0</span> selected
-          <button class="btn-sm" onclick="boxAssignSelected()" style="margin-left:4px;">Assign to Event</button>
+          <input id="map-box-group" placeholder="Group name (optional)" style="width:150px;font-size:13px;padding:2px 6px;margin-left:4px;" />
+          <button class="btn-sm" onclick="boxAssignSelected()" style="margin-left:4px;">Add to event</button>
           <button class="btn-sm btn-danger" onclick="boxDeleteSelected()" style="margin-left:4px;">Delete</button>
           <button class="btn-sm" onclick="clearBoxSelection()" style="margin-left:2px;">Clear</button>
         </span>
       </div>
-      <div id="map-group-panel" class="card" style="margin-bottom:8px;display:none;">
-        <h3>Walk Groups <span id="map-group-event-name" style="font-weight:400;color:var(--sa-gray);"></span></h3>
-        <div id="map-group-list" style="font-size:13px;"></div>
-      </div>
       <div style="position:relative;">
         <div id="map" style="height:550px;border-radius:8px;"></div>
         <div id="map-loading"><div class="loading-pill"><span class="loading-spinner"></span><span id="map-loading-text">Loading houses…</span></div></div>
+      </div>
+      <div id="map-group-panel" class="card" style="margin-top:12px;display:none;">
+        <h3>Walk Groups</h3>
+        <form id="map-group-form" class="inline-form" style="margin-bottom:10px;align-items:center;">
+          <label style="font-size:13px;">Houses per group
+            <input name="group_size" type="number" value="20" min="5" max="100" style="width:70px;" />
+          </label>
+          <label style="font-size:13px;display:flex;align-items:center;gap:4px;" title="Start over: regroup every house, including ones already in a group">
+            <input name="redo_all" type="checkbox" /> Redo all groups
+          </label>
+          <button type="submit">Make groups</button>
+        </form>
+        <p id="map-group-result" class="help-text" style="display:none;"></p>
+        <div id="map-group-list" style="font-size:13px;"></div>
       </div>
 
 
@@ -208,71 +184,22 @@
     <section id="page-event-detail" class="page">
       <h2 id="event-detail-title"></h2>
       <div class="card">
-        <h3>Manual Assign</h3>
-        <form id="assign-form" class="inline-form">
-          <span class="tooltip-wrap">
-            <input name="zip_codes" placeholder="ZIP codes (comma-separated)" />
-            <span class="tooltip">Filter houses by ZIP code, e.g. 75201, 75202</span>
-          </span>
-          <span class="tooltip-wrap">
-            <input name="street_names" placeholder="Street names (comma-separated)" />
-            <span class="tooltip">Filter by street name, e.g. Elm St, Main St</span>
-          </span>
-          <span class="tooltip-wrap">
-            <input name="limit" type="number" value="250" min="1" />
-            <span class="tooltip">Max number of houses to assign</span>
-          </span>
-          <span class="tooltip-wrap">
-            <input name="assigned_to" placeholder="Assigned to" />
-            <span class="tooltip">Group label or volunteer name</span>
-          </span>
-          <button type="submit" title="Assign matching houses to this event">Assign</button>
-        </form>
-      </div>
-      <div class="card">
-        <h3>Assigned Houses</h3>
+        <h3>Houses</h3>
+        <p class="help-text">Add houses and make walk groups on the map.</p>
         <div id="event-houses-list"></div>
+        <button onclick="openMapForEvent(currentEventId)">Edit on Map</button>
         <button id="btn-print-packet" onclick="printPacket()" title="Print a walk packet for assigned houses">Print Packet</button>
         <button class="btn-sm" onclick="exportEventHousesCSV()" title="Export assigned houses to CSV">Export CSV</button>
       </div>
     </section>
 
-    <!-- Walk Groups -->
-    <section id="page-walk-groups" class="page">
-      <h2>Walk Groups</h2>
-      <div class="card card-highlight">
-        <h3>Generate Walk Groups</h3>
-        <p class="help-text">Auto-group the event's assigned houses by street into walkable clusters. Houses on the same street are sorted by address number and split into groups of adjacent homes for scouts to walk.</p>
-        <form id="walk-group-form" class="inline-form">
-          <span class="tooltip-wrap">
-            <select id="wg-event-select" required>
-              <option value="">Select an event…</option>
-            </select>
-            <span class="tooltip">Event whose houses will be grouped</span>
-          </span>
-          <span class="tooltip-wrap">
-            <input name="group_size" type="number" value="20" min="5" max="100" />
-            <span class="tooltip">Number of houses per walk group</span>
-          </span>
-          <button type="submit" title="Generate walk groups for scouts">Generate Groups</button>
-        </form>
-        <div id="walk-group-result" class="hidden" style="margin-top:10px;"></div>
-      </div>
-      <div class="card">
-        <h3>Generated Groups</h3>
-        <div id="wg-groups-list"><p>Select an event and generate groups above.</p></div>
-        <div style="margin-top:12px;">
-          <button class="btn-sm" onclick="exportWalkGroupsCSV()">Export Walk Groups CSV</button>
-        </div>
-      </div>
-    </section>
-
     <!-- Imports -->
     <section id="page-imports" class="page">
-      <h2>Import Public Data</h2>
+      <h2>Import Data</h2>
+      <p class="help-text">Bulk-load houses into the database. This doesn't add them to an event — do that on the <a href="#" onclick="showPage('map')">Map</a>.</p>
 
       <div class="card card-highlight">
-        <h3>Fetch from ArcGIS (Recommended)</h3>
+        <h3>Fetch from ArcGIS by ZIP Code</h3>
         <p class="help-text">Pull tax parcel data directly from the City of Dallas ArcGIS REST service — no file download needed. Includes addresses, owner names, parcel IDs, and appraised values with coordinates.</p>
         <form id="arcgis-form" class="inline-form">
           <span class="tooltip-wrap">
@@ -287,12 +214,6 @@
           <span class="tooltip-wrap">
             <input name="notes" placeholder="Notes (optional)" />
             <span class="tooltip">Optional label for this fetch batch</span>
-          </span>
-          <span class="tooltip-wrap">
-            <select name="event_id" id="arcgis-event-select">
-              <option value="">No event (import only)</option>
-            </select>
-            <span class="tooltip">Optionally assign fetched parcels to an event for walk groups</span>
           </span>
           <button type="submit" title="Fetch parcels from Dallas ArcGIS">Fetch Parcels</button>
         </form>
@@ -339,12 +260,6 @@
           <span class="tooltip-wrap">
             <input name="notes" placeholder="Notes (optional)" />
             <span class="tooltip">Optional label to identify this import batch</span>
-          </span>
-          <span class="tooltip-wrap">
-            <select name="event_id" id="import-event-select">
-              <option value="">No event (import only)</option>
-            </select>
-            <span class="tooltip">Optionally assign all imported houses to an event so you can create walk groups immediately</span>
           </span>
           <button type="submit">Import</button>
         </form>
@@ -408,8 +323,10 @@
     <!-- Roster -->
     <section id="page-roster" class="page">
       <h2>Scout Roster</h2>
+      <div id="roster-new-passwords" class="card card-highlight hidden"></div>
       <div class="card">
         <h3>Add Scout</h3>
+        <p class="help-text">Each scout gets a random 6-digit password. It's shown only once, so write it down or print it. Lost one? Click <strong>New password</strong>.</p>
         <form id="roster-form" class="inline-form">
           <span class="tooltip-wrap">
             <input name="name" placeholder="Scout name" required />
@@ -427,12 +344,12 @@
         <details class="source-guides">
           <summary>CSV Format Guide</summary>
           <p style="margin:8px 0 4px;font-size:13px;color:var(--sa-gray);line-height:1.6;">
-            Upload a CSV file with a <strong>header row</strong>. Required column: <code>name</code>. Optional columns: <code>scout_id</code>, <code>password</code> (min 4 chars). Extra columns are ignored. Duplicate names are skipped.
+            Upload a CSV file with a <strong>header row</strong>. Required column: <code>name</code>. Optional column: <code>scout_id</code>. Extra columns are ignored. Duplicate names are skipped. Passwords are created for you.
           </p>
-          <pre style="background:#f5f5f0;padding:10px 14px;border-radius:6px;font-size:13px;margin-top:6px;overflow-x:auto;">name,scout_id,password
-John Smith,12345,pass1234
-Jane Doe,67890,
-Alex Johnson,,mypass</pre>
+          <pre style="background:#f5f5f0;padding:10px 14px;border-radius:6px;font-size:13px;margin-top:6px;overflow-x:auto;">name,scout_id
+John Smith,12345
+Jane Doe,67890
+Alex Johnson,</pre>
         </details>
         <form id="roster-import-form" class="inline-form" enctype="multipart/form-data" style="margin-top:10px;">
           <input name="file" type="file" accept=".csv" required />
@@ -440,6 +357,7 @@ Alex Johnson,,mypass</pre>
         </form>
         <div id="roster-import-status" class="hidden" style="margin-top:8px;font-size:14px;"></div>
       </div>
+      <div id="roster-missing-passwords"></div>
       <div id="roster-list" class="card-list"></div>
       <div style="margin-top:12px;"><button class="btn-sm" onclick="exportRosterCSV()">Export Roster CSV</button></div>
     </section>

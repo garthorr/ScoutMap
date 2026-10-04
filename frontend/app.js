@@ -277,17 +277,16 @@ function exportCSV(filename, headers, rows) {
 // --- Navigation ---
 function showPage(name, evt) {
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
-  document.querySelectorAll(".nav-links a").forEach(a => a.classList.remove("active"));
+  // Highlight the matching menu item, even when navigating from a button
+  document.querySelectorAll(".nav-links a").forEach(a => a.classList.toggle("active", a.dataset.page === name));
   const el = document.getElementById("page-" + name);
   if (el) el.classList.add("active");
-  if (evt?.target?.tagName === "A") evt.target.classList.add("active");
 
   if (name === "dashboard") loadDashboard();
   if (name === "map") initMap();
   if (name === "events") loadEvents();
-  if (name === "imports") { loadImports(); loadUnmatched(); loadImportEventSelect(); loadArcGISEventSelect(); }
+  if (name === "imports") { loadImports(); loadUnmatched(); }
   if (name === "houses") loadHouses();
-  if (name === "walk-groups") loadWalkGroupEvents();
   if (name === "roster") loadRoster();
   if (name === "scout-data") { loadScoutDataEvents(); loadScoutData(); }
   if (name === "scout-form") loadFormFields();
@@ -302,27 +301,115 @@ function _phaseStat(label, value, page) {
   </div>`;
 }
 
+// The event being worked on, shared by the dashboard and the map
+function _getWorkingEventId() {
+  try { return localStorage.getItem("scoutmap_event") || ""; } catch { return ""; }
+}
+function _setWorkingEventId(id) {
+  try { localStorage.setItem("scoutmap_event", id || ""); } catch { /* ok */ }
+}
+
+// Sort so "Group 2" comes before "Group 10"
+function _naturalCompare(a, b) {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+}
+
 async function loadDashboard() {
-  const r = await authFetch(API + "/api/stats/");
-  const s = await r.json();
+  const [statsR, eventsR] = await Promise.all([
+    authFetch(API + "/api/stats/"),
+    authFetch(API + "/api/events/"),
+  ]);
+  const s = await statsR.json();
+  const events = await eventsR.json();
 
-  // Phase 1: Prepare Data
-  document.getElementById("phase-prepare-stats").innerHTML =
+  document.getElementById("dash-totals").innerHTML =
     _phaseStat("Events", s.total_events, "events") +
-    _phaseStat("Imports", s.import_count, "imports") +
-    _phaseStat("Unmatched", s.unmatched_count, "imports") +
-    _phaseStat("Scouts", s.total_scouts ?? 0, "roster");
-
-  // Phase 2: Organize
-  document.getElementById("phase-organize-stats").innerHTML =
-    _phaseStat("Houses", s.total_houses, "houses") +
-    _phaseStat("Assigned", s.assigned_houses ?? 0, "events") +
-    _phaseStat("Visited", s.houses_visited ?? 0, "scout-data");
-
-  // Phase 3: Collect
-  document.getElementById("phase-collect-stats").innerHTML =
+    _phaseStat("Houses in database", s.total_houses, "houses") +
+    _phaseStat("Active scouts", s.total_scouts ?? 0, "roster") +
     _phaseStat("Visits", s.total_visits, "scout-data") +
-    _phaseStat("Donations", "$" + (s.total_donations || 0).toLocaleString(), "scout-data");
+    _phaseStat("Donations", "$" + (s.total_donations || 0).toLocaleString(), "scout-data") +
+    (s.unmatched_count ? _phaseStat("Unmatched import records", s.unmatched_count, "imports") : "");
+
+  const sel = document.getElementById("dash-event-select");
+  if (!events.length) {
+    sel.innerHTML = '<option value="">No events yet</option>';
+    _renderChecklist("", null);
+    return;
+  }
+  // Default to the event last worked on, else the newest
+  let current = _getWorkingEventId();
+  if (!events.some(e => e.id === current)) current = events[0].id;
+  sel.innerHTML = events.map(e =>
+    `<option value="${esc(e.id)}"${e.id === current ? " selected" : ""}>${esc(e.name)}</option>`).join("");
+  await _loadChecklist();
+}
+
+document.getElementById("dash-event-select").onchange = function () {
+  _setWorkingEventId(this.value);
+  _loadChecklist();
+};
+
+async function _loadChecklist() {
+  const eventId = document.getElementById("dash-event-select").value;
+  if (!eventId) return;
+  const r = await authFetch(API + "/api/stats/checklist?event_id=" + encodeURIComponent(eventId));
+  _renderChecklist(eventId, r.ok ? await r.json() : null);
+}
+
+function _renderChecklist(eventId, c) {
+  const ev = esc(eventId);
+  const notGrouped = c ? c.houses - c.grouped : 0;
+  const steps = [
+    {
+      title: "Create an event", done: !!eventId,
+      detail: eventId ? "Done" : "Give your fundraiser a name and date.",
+      action: "Create event", go: "showPage('events')",
+    },
+    {
+      title: "Add houses on the map", done: c?.houses > 0,
+      detail: c?.houses ? `${c.houses.toLocaleString()} houses in this event` : "Draw a boundary around the area to walk.",
+      action: "Open map", go: `openMapForEvent('${ev}')`,
+    },
+    {
+      title: "Make walk groups", done: c?.houses > 0 && notGrouped === 0,
+      detail: !c?.houses ? "Add houses first."
+        : `${c.groups} group(s)` + (notGrouped ? ` · ${notGrouped} houses not in a group yet` : ""),
+      action: "Open map", go: `openMapForEvent('${ev}')`,
+    },
+    {
+      title: "Add scouts", done: c?.scouts_ready > 0 && !c.scouts_no_password,
+      detail: !c ? "Add scouts to the roster."
+        : `${c.scouts_ready} scout(s) can sign in` + (c.scouts_no_password ? ` · ${c.scouts_no_password} still need a password` : ""),
+      action: "Scouts", go: "showPage('roster')",
+    },
+    {
+      title: "Send scouts out", done: c?.visits > 0,
+      detail: c?.visits
+        ? `${c.houses_visited} of ${c.houses} houses visited · $${c.donations.toLocaleString()} donated`
+        : `Share the scout app: ${location.origin}/scout`,
+      action: c?.visits ? "Scout data" : "Copy link", go: c?.visits ? "showPage('scout-data')" : "copyScoutLink()",
+    },
+  ];
+  const next = steps.findIndex(st => !st.done);
+  document.getElementById("dash-checklist").innerHTML = steps.map((st, i) => `
+    <li class="${st.done ? "done" : ""}${i === next ? " next" : ""}">
+      <span class="check-icon">${st.done ? "&#10003;" : i + 1}</span>
+      <span class="check-text">
+        <span class="check-title">${esc(st.title)}</span>
+        <span class="check-detail">${esc(st.detail)}</span>
+      </span>
+      <button class="${i === next ? "" : "btn-sm btn-quiet"}" onclick="${st.go}">${i === next ? "Next: " : ""}${esc(st.action)}</button>
+    </li>`).join("");
+}
+
+async function copyScoutLink() {
+  const url = location.origin + "/scout";
+  try {
+    await navigator.clipboard.writeText(url);
+    _flashStatus("Copied " + url);
+  } catch {
+    prompt("Copy this link for your scouts:", url);
+  }
 }
 
 // --- Map ---
@@ -336,7 +423,7 @@ const GROUP_COLORS = [
 ];
 
 function initMap() {
-  if (map) { map.invalidateSize(); refreshMapDots(); return; }
+  if (map) { map.invalidateSize(); refreshMapDots(); _loadMapEventSelect(); return; }
   setTimeout(() => {
     map = L.map("map").setView([32.78, -96.80], 12);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -436,50 +523,84 @@ async function refreshMapDots() {
   }
 }
 
-async function _loadMapEventSelect() {
+const NO_GROUP = "Not in a group";
+let _mapEventHouses = [];  // houses in the selected event, for CSV export
+
+function _mapEventId() {
+  return document.getElementById("map-event-select").value;
+}
+function _mapEventName() {
+  const sel = document.getElementById("map-event-select");
+  return sel.value ? (sel.options[sel.selectedIndex].dataset.name || "") : "";
+}
+
+/** Reload the event list (house counts change) and redraw the selected event. */
+async function _loadMapEventSelect({ fit = true } = {}) {
   const sel = document.getElementById("map-event-select");
   try {
     const r = await authFetch(API + "/api/events/");
     const events = await r.json();
-    sel.innerHTML = '<option value="">Walk Groups: none</option>' +
-      events.map(e => `<option value="${esc(e.id)}">${esc(e.name)} (${e.house_count})</option>`).join("");
+    const current = _getWorkingEventId();
+    sel.innerHTML = '<option value="">Choose an event…</option>' +
+      events.map(e => `<option value="${esc(e.id)}" data-name="${esc(e.name)}"${e.id === current ? " selected" : ""}>${esc(e.name)} (${e.house_count} houses)</option>`).join("");
+    loadWalkRoutes(sel.value, { fit });
   } catch { /* ignore */ }
 }
 
 document.getElementById("map-event-select").onchange = function () {
+  _setWorkingEventId(this.value);
+  document.getElementById("map-group-result").style.display = "none";
   loadWalkRoutes(this.value);
 };
 
-async function loadWalkRoutes(eventId) {
+/** Jump to the map with an event already picked. */
+function openMapForEvent(eventId) {
+  _setWorkingEventId(eventId);
+  showPage("map");
+}
+
+/** Refresh counts and routes after houses or groups change, without moving the map. */
+function _refreshMapEvent() {
+  return _loadMapEventSelect({ fit: false });
+}
+
+function _requireMapEvent() {
+  const eventId = _mapEventId();
+  if (!eventId) alert("Pick an event at the top of the map first.");
+  return eventId;
+}
+
+async function loadWalkRoutes(eventId, { fit = true } = {}) {
   walkRouteLayer.clearLayers();
+  _mapEventHouses = [];
+  const panel = document.getElementById("map-group-panel");
   if (!eventId) {
-    document.getElementById("map-group-panel").style.display = "none";
+    panel.style.display = "none";
     return;
   }
   try {
   const r = await authFetch(API + `/api/events/${eventId}/houses`);
   if (!r.ok) { console.error("loadWalkRoutes fetch failed", r.status); return; }
   const houses = await r.json();
-  if (!houses.length) {
-    document.getElementById("map-group-panel").style.display = "none";
-    return;
-  }
+  _mapEventHouses = houses;
 
   // Group by assigned_to
   const groups = {};
   houses.forEach(eh => {
-    const key = eh.assigned_to || "Unassigned";
+    const key = eh.assigned_to || NO_GROUP;
     if (!groups[key]) groups[key] = [];
     groups[key].push(eh);
   });
+  // Same order for map colors and the list below; ungrouped houses last
+  const labels = Object.keys(groups).filter(l => l !== NO_GROUP).sort(_naturalCompare);
+  if (groups[NO_GROUP]) labels.push(NO_GROUP);
 
-  let colorIdx = 0;
-  for (const [label, items] of Object.entries(groups)) {
-    const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
-    colorIdx++;
+  labels.forEach((label, colorIdx) => {
+    const items = groups[label];
+    const color = label === NO_GROUP ? "#858787" : GROUP_COLORS[colorIdx % GROUP_COLORS.length];
 
     const withCoords = items.filter(eh => eh.house?.latitude != null && eh.house?.longitude != null);
-    if (!withCoords.length) continue;
+    if (!withCoords.length) return;
 
     // Sub-group by street_name within this walk group
     const byStreet = {};
@@ -489,22 +610,24 @@ async function loadWalkRoutes(eventId) {
       byStreet[street].push(eh);
     });
 
-    // Draw one trace per street — a midline down the street
-    for (const [street, streetHouses] of Object.entries(byStreet)) {
-      streetHouses.sort((a, b) => {
-        const an = parseInt(a.house.address_number) || 0;
-        const bn = parseInt(b.house.address_number) || 0;
-        return an - bn;
-      });
+    // Draw one trace per street — a midline down the street (not for ungrouped houses)
+    if (label !== NO_GROUP) {
+      for (const [street, streetHouses] of Object.entries(byStreet)) {
+        streetHouses.sort((a, b) => {
+          const an = parseInt(a.house.address_number) || 0;
+          const bn = parseInt(b.house.address_number) || 0;
+          return an - bn;
+        });
 
-      if (streetHouses.length >= 2) {
-        const midCoords = _computeMidline(streetHouses);
-        if (midCoords.length >= 2) {
-          const line = L.polyline(midCoords, {
-            color, weight: 5, opacity: 0.7, lineCap: "round", lineJoin: "round",
-          });
-          line.bindPopup(`<b>${esc(label)}</b><br>${esc(street)}<br>${streetHouses.length} houses`);
-          walkRouteLayer.addLayer(line);
+        if (streetHouses.length >= 2) {
+          const midCoords = _computeMidline(streetHouses);
+          if (midCoords.length >= 2) {
+            const line = L.polyline(midCoords, {
+              color, weight: 5, opacity: 0.7, lineCap: "round", lineJoin: "round",
+            });
+            line.bindPopup(`<b>${esc(label)}</b><br>${esc(street)}<br>${streetHouses.length} houses`);
+            walkRouteLayer.addLayer(line);
+          }
         }
       }
     }
@@ -518,54 +641,85 @@ async function loadWalkRoutes(eventId) {
       dot.bindPopup(`<b>${esc(eh.house.full_address)}</b><br>Group: ${esc(label)}<br>Status: ${esc(eh.status)}`);
       walkRouteLayer.addLayer(dot);
     });
-  }
+  });
 
   // Fit map to routes
   const allCoords = houses
     .filter(eh => eh.house?.latitude != null && eh.house?.longitude != null)
     .map(eh => [eh.house.latitude, eh.house.longitude]);
-  if (allCoords.length) map.fitBounds(L.latLngBounds(allCoords).pad(0.1));
+  if (fit && allCoords.length) map.fitBounds(L.latLngBounds(allCoords).pad(0.1));
 
-  // Render group manipulation panel
-  _renderGroupPanel(eventId, groups);
+  _renderGroupPanel(eventId, groups, labels);
   } catch (err) {
     console.error("loadWalkRoutes error:", err);
   }
 }
 
-function _renderGroupPanel(eventId, groups) {
+function _renderGroupPanel(eventId, groups, labels) {
   const panel = document.getElementById("map-group-panel");
   const listEl = document.getElementById("map-group-list");
-  const nameEl = document.getElementById("map-group-event-name");
+  const form = document.getElementById("map-group-form");
+  panel.style.display = "";
 
-  const labels = Object.keys(groups);
   if (!labels.length) {
-    panel.style.display = "none";
+    form.style.display = "none";
+    listEl.innerHTML = "<p>No houses in this event yet. Click <strong>Boundary</strong> and draw around the area to walk.</p>";
     return;
   }
+  form.style.display = "";
 
-  panel.style.display = "";
-  const sel = document.getElementById("map-event-select");
-  nameEl.textContent = "— " + (sel.options[sel.selectedIndex]?.text || "");
-
-  let colorIdx = 0;
-  listEl.innerHTML = labels.map(label => {
-    const color = GROUP_COLORS[colorIdx % GROUP_COLORS.length];
-    colorIdx++;
-    const count = groups[label].length;
-    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:4px 0;border-bottom:1px solid #eee;">
-      <input type="checkbox" class="group-merge-cb" value="${esc(label)}" title="Select for merge" />
+  listEl.innerHTML = labels.map((label, colorIdx) => {
+    const isNone = label === NO_GROUP;
+    const color = isNone ? "#858787" : GROUP_COLORS[colorIdx % GROUP_COLORS.length];
+    const items = groups[label];
+    const visited = items.filter(eh => eh.status === "visited").length;
+    // Labels go in data attributes (not inline JS strings) so quotes in names can't break the buttons
+    return `<div class="group-row" data-label="${esc(label)}" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:4px 0;border-bottom:1px solid #eee;">
+      ${isNone ? '<span style="width:13px;"></span>' : `<input type="checkbox" class="group-merge-cb" value="${esc(label)}" title="Select for merge" />`}
       <span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${color};flex-shrink:0;"></span>
       <strong style="min-width:80px;">${esc(label)}</strong>
-      <span style="color:var(--sa-gray);font-size:12px;">${count} houses</span>
-      <button class="btn-sm" onclick="renameGroup('${esc(eventId)}','${esc(label)}')" style="margin-left:auto;">Rename</button>
-      <button class="btn-sm btn-danger" onclick="deleteGroup('${esc(eventId)}','${esc(label)}')">Delete</button>
+      <span style="color:var(--sa-gray);font-size:12px;">${items.length} houses${visited ? `, ${visited} visited` : ""}</span>
+      ${isNone ? "" : `<button class="btn-sm" onclick="renameGroup('${esc(eventId)}', this.closest('.group-row').dataset.label)" style="margin-left:auto;">Rename</button>
+      <button class="btn-sm btn-danger" onclick="deleteGroup('${esc(eventId)}', this.closest('.group-row').dataset.label)">Remove</button>`}
     </div>`;
   }).join("") +
-    `<div style="margin-top:8px;">
-      <button class="btn-sm" onclick="mergeSelectedGroups('${esc(eventId)}')">Merge Selected</button>
+    `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="btn-sm" onclick="mergeSelectedGroups('${esc(eventId)}')">Merge selected</button>
+      <button class="btn-sm" onclick="openEvent('${esc(eventId)}', _mapEventName())">House list &amp; print</button>
+      <button class="btn-sm" onclick="exportWalkGroupsCSV()">Export CSV</button>
     </div>`;
 }
+
+document.getElementById("map-group-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const eventId = _requireMapEvent();
+  if (!eventId) return;
+  const fd = new FormData(e.target);
+  const redoAll = fd.get("redo_all") === "on";
+  if (redoAll && !confirm("Redo all groups?\n\nEvery house will be regrouped by street. Group names you set yourself (including ones drawn on the map) will be replaced.")) return;
+
+  const resultEl = document.getElementById("map-group-result");
+  resultEl.style.display = "";
+  resultEl.textContent = "Making groups…";
+  try {
+    const r = await authFetch(API + `/api/events/${eventId}/walk-groups`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ group_size: parseInt(fd.get("group_size") || "20"), keep_existing: !redoAll }),
+    });
+    const data = await r.json();
+    if (!r.ok) { resultEl.textContent = "Error: " + (data.detail || `server returned ${r.status}`); return; }
+    const parts = [];
+    if (data.groups.length) parts.push(`Made ${data.groups.length} new group(s) from ${data.total_assigned} houses.`);
+    else if (data.message) parts.push(data.message);
+    if (data.kept) parts.push(`${data.kept} houses kept their existing group.`);
+    if (data.skipped_no_street) parts.push(`${data.skipped_no_street} houses were skipped because they have no street name. To group them, use Select on the map, type a group name, and click Add to event.`);
+    resultEl.textContent = parts.join(" ");
+    e.target.redo_all.checked = false;
+    _refreshMapEvent();
+  } catch (err) {
+    resultEl.textContent = "Network error: " + err.message;
+  }
+};
 
 async function renameGroup(eventId, oldLabel) {
   const newLabel = prompt(`Rename group "${oldLabel}" to:`, oldLabel);
@@ -577,9 +731,7 @@ async function renameGroup(eventId, oldLabel) {
       body: JSON.stringify({ old_label: oldLabel, new_label: newLabel.trim() }),
     });
     if (r.ok) {
-      loadWalkRoutes(eventId);
-      // Refresh walk group list if on that page
-      if (document.getElementById("page-walk-groups").classList.contains("active")) loadWalkGroupList();
+      _refreshMapEvent();
     } else {
       const data = await r.json().catch(() => ({}));
       alert(data.detail || "Failed to rename group.");
@@ -590,14 +742,13 @@ async function renameGroup(eventId, oldLabel) {
 }
 
 async function deleteGroup(eventId, label) {
-  if (!confirm(`Delete group "${label}"? All houses in this group will be unassigned from the event.`)) return;
+  if (!confirm(`Remove group "${label}"?\n\nIts houses will be taken out of this event, and any visits recorded for them will be deleted. The houses stay in the database.`)) return;
   try {
     const r = await authFetch(API + `/api/events/${eventId}/groups?label=${encodeURIComponent(label)}`, {
       method: "DELETE",
     });
     if (r.ok) {
-      loadWalkRoutes(eventId);
-      if (document.getElementById("page-walk-groups").classList.contains("active")) loadWalkGroupList();
+      _refreshMapEvent();
     } else {
       const data = await r.json().catch(() => ({}));
       alert(data.detail || "Failed to delete group.");
@@ -630,8 +781,7 @@ async function mergeSelectedGroups(eventId) {
     if (r.ok) {
       const data = await r.json();
       alert(`Merged ${data.updated || sourceLabels.length} group(s) into "${targetLabel.trim()}".`);
-      loadWalkRoutes(eventId);
-      if (document.getElementById("page-walk-groups").classList.contains("active")) loadWalkGroupList();
+      _refreshMapEvent();
     } else {
       const data = await r.json().catch(() => ({}));
       alert(data.detail || "Failed to merge groups.");
@@ -920,49 +1070,42 @@ async function boxDeleteSelected() {
 
 async function boxAssignSelected() {
   if (!_boxSelectedHouses.length) return;
+  const eventId = _requireMapEvent();
+  if (!eventId) return;
   const ids = _boxSelectedHouses.map(h => h.id).filter(Boolean);
   if (!ids.length) { alert("No house IDs found. Zoom in closer and try again."); return; }
+  const groupLabel = document.getElementById("map-box-group").value.trim();
 
-  // Prompt for event selection
-  let eventsData;
+  _showStatus(`Adding ${ids.length} house(s)…`);
   try {
-    const r = await authFetch(API + "/api/events/");
-    eventsData = await r.json();
-  } catch { alert("Could not load events."); return; }
-
-  if (!eventsData.length) { alert("No events exist. Create one first."); return; }
-
-  const eventName = prompt("Enter event name to assign to:\n\n" + eventsData.map(e => "  " + e.name).join("\n"));
-  if (!eventName) return;
-  const ev = eventsData.find(e => e.name.toLowerCase() === eventName.trim().toLowerCase());
-  if (!ev) { alert("Event not found. Enter the exact name."); return; }
-
-  const groupLabel = prompt("Group label (optional):", "");
-
-  _showStatus(`Assigning ${ids.length} house(s)…`);
-  try {
-    const body = {
-      house_ids: ids,
-      assigned_to: groupLabel || undefined,
-    };
-    const ar = await authFetch(API + `/api/events/${ev.id}/assign`, {
+    const ar = await authFetch(API + `/api/events/${eventId}/assign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ house_ids: ids, assigned_to: groupLabel || undefined }),
     });
     if (ar.ok) {
       const data = await ar.json();
-      _flashStatus(`Assigned ${data.assigned || ids.length} house(s) to "${ev.name}".`);
+      _flashStatus(_assignMessage(data.assigned, data.regrouped, groupLabel));
+      document.getElementById("map-box-group").value = "";
       clearBoxSelection();
+      _refreshMapEvent();
     } else {
       _hideStatus();
       const data = await ar.json().catch(() => ({}));
-      alert(data.detail || "Error assigning houses.");
+      alert(data.detail || "Error adding houses.");
     }
   } catch (err) {
     _hideStatus();
     alert("Error: " + err.message);
   }
+}
+
+function _assignMessage(added, regrouped, groupLabel) {
+  if (!added && !regrouped) return "Those houses are already in this event.";
+  const parts = [];
+  if (added) parts.push(`Added ${added} house(s) to "${_mapEventName()}"` + (groupLabel ? ` in group "${groupLabel}"` : ""));
+  if (regrouped) parts.push(`Moved ${regrouped} house(s) into group "${groupLabel}"`);
+  return parts.join(". ") + ".";
 }
 
 function _handleMapToolClick(e) {
@@ -1039,17 +1182,6 @@ async function closeBoundary() {
   document.getElementById("map-boundary-count").textContent = "counting…";
   document.getElementById("map-tool-hint").textContent = "";
 
-  // Load event dropdown
-  try {
-    const r = await authFetch(API + "/api/events/");
-    if (r.ok) {
-      const events = await r.json();
-      const sel = document.getElementById("map-boundary-event");
-      sel.innerHTML = '<option value="">Select event…</option>' +
-        events.map(ev => `<option value="${esc(ev.id)}">${esc(ev.name)}</option>`).join("");
-    }
-  } catch {}
-
   // Query house count
   try {
     const r = await authFetch(API + "/api/houses/in-polygon", {
@@ -1089,48 +1221,45 @@ async function closeBoundary() {
 async function boundaryImportFromArcGIS() {
   if (!_boundaryPoints.length) return;
   const arcgisCountText = document.getElementById("map-boundary-arcgis-count").textContent;
-  const eventId = document.getElementById("map-boundary-event").value || undefined;
-  const groupLabel = document.getElementById("map-boundary-group").value.trim() || undefined;
+  const eventId = _mapEventId();
 
   let msg = `Import all ArcGIS parcels within this boundary ${arcgisCountText}?`;
-  if (eventId) msg += "\n\nImported houses will also be assigned to the selected event.";
+  if (eventId) msg += `\n\nThey'll also be added to "${_mapEventName()}".`;
   if (!confirm(msg)) return;
 
-  document.getElementById("map-boundary-arcgis-count").textContent = "(importing…)";
+  const countEl = document.getElementById("map-boundary-arcgis-count");
+  countEl.textContent = "(importing…)";
   _showStatus("Importing parcels from ArcGIS…");
   try {
-    const body = {
-      polygon: _boundaryPoints,
-      max_records: 10000,
-      notes: "Boundary import from map",
-    };
-    if (eventId) body.event_id = eventId;
     const r = await authFetch(API + "/api/arcgis/fetch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ polygon: _boundaryPoints, max_records: 10000, notes: "Boundary import from map" }),
     });
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
-      _hideStatus();
-      alert("Error: " + (data.detail || `Server returned ${r.status}`));
-      document.getElementById("map-boundary-arcgis-count").textContent = arcgisCountText;
-      return;
+      throw new Error(data.detail || `Server returned ${r.status}`);
     }
-    const data = await r.json();
-    let result = `Fetched ${data.fetched} parcels, imported ${data.imported} records.`;
-    if (data.assigned) result += ` ${data.assigned} assigned to "${data.event_name}".`;
-    document.getElementById("map-boundary-arcgis-count").textContent = `(${data.imported} imported)`;
-    _flashStatus(`Imported ${data.imported} parcels from ArcGIS.`);
+    // The import runs in the background; wait for it to finish
+    const started = await r.json();
+    const result = await _waitForImport(started.import_id);
+    if (result.status === "failed") throw new Error("The import failed. See Import Data for details.");
+    countEl.textContent = `(${result.record_count} imported)`;
+    _flashStatus(`Imported ${result.record_count} parcels from ArcGIS.`);
   } catch (err) {
     _hideStatus();
     alert("Import error: " + err.message);
-    document.getElementById("map-boundary-arcgis-count").textContent = arcgisCountText;
+    countEl.textContent = arcgisCountText;
     return;
   }
 
-  // Refresh map and re-count independently — errors here should not mask import success
   refreshMapDots();
+  // Add everything inside the boundary (new and existing houses) to the event
+  if (eventId) await _assignBoundary(eventId);
+  else _recountBoundary();
+}
+
+async function _recountBoundary() {
   try {
     const cr = await authFetch(API + "/api/houses/in-polygon", {
       method: "POST",
@@ -1141,42 +1270,38 @@ async function boundaryImportFromArcGIS() {
       const cd = await cr.json();
       document.getElementById("map-boundary-count").textContent = (cd.count || 0).toLocaleString();
     }
-  } catch {}
+  } catch { /* count is informational */ }
 }
 
 async function boundaryAssignToEvent() {
-  const eventId = document.getElementById("map-boundary-event").value;
-  if (!eventId) { alert("Select an event first."); return; }
-  const groupLabel = document.getElementById("map-boundary-group").value.trim() || undefined;
+  const eventId = _requireMapEvent();
+  if (!eventId) return;
+  await _assignBoundary(eventId);
+}
 
-  const countText = document.getElementById("map-boundary-count").textContent;
-  if (!confirm(`Assign ${countText} houses in this boundary to the selected event?`)) return;
-
-  document.getElementById("map-boundary-count").textContent = "assigning…";
+async function _assignBoundary(eventId) {
+  const groupLabel = document.getElementById("map-boundary-group").value.trim();
+  const countEl = document.getElementById("map-boundary-count");
+  const countText = countEl.textContent;
+  countEl.textContent = "adding…";
   try {
     const r = await authFetch(API + "/api/houses/in-polygon", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        polygon: _boundaryPoints,
-        event_id: eventId,
-        assigned_to: groupLabel,
-      }),
+      body: JSON.stringify({ polygon: _boundaryPoints, event_id: eventId, assigned_to: groupLabel || undefined }),
     });
     const data = await r.json();
     if (r.ok) {
-      const msg = `${data.assigned} houses assigned (${data.count} total in boundary)`;
-      document.getElementById("map-boundary-count").textContent = data.count.toLocaleString();
-      alert(msg);
-      // Highlight assigned houses on map
-      _showBoundaryHouses(data.house_ids);
+      countEl.textContent = data.count.toLocaleString();
+      _flashStatus(_assignMessage(data.assigned, data.regrouped, groupLabel));
+      _refreshMapEvent();
     } else {
       alert("Error: " + (data.detail || JSON.stringify(data)));
-      document.getElementById("map-boundary-count").textContent = countText;
+      countEl.textContent = countText;
     }
   } catch (err) {
     alert("Network error: " + err.message);
-    document.getElementById("map-boundary-count").textContent = countText;
+    countEl.textContent = countText;
   }
 }
 
@@ -1231,11 +1356,6 @@ async function boundaryDeleteHouses() {
   }
 }
 
-function _showBoundaryHouses(houseIds) {
-  // We already have the polygon on the map; no need to re-highlight
-  // but we update the count to reflect assigned count
-}
-
 function clearBoundary() {
   _boundaryPoints = [];
   _boundaryClosed = false;
@@ -1248,6 +1368,7 @@ function clearBoundary() {
   _boundaryHouseHighlights = [];
   document.getElementById("map-boundary-ui").style.display = "none";
   document.getElementById("map-boundary-result").style.display = "none";
+  document.getElementById("map-boundary-group").value = "";
 }
 
 
@@ -1321,13 +1442,14 @@ async function loadEvents() {
   const events = await r.json();
   document.getElementById("events-list").innerHTML = events.length
     ? `<table><tr><th>Name</th><th>Description</th><th>Date</th><th>Houses</th><th></th></tr>` +
-      events.map(e => `<tr>
+      events.map(e => `<tr data-name="${esc(e.name)}">
         <td>${esc(e.name)}</td>
         <td>${esc(e.description || "")}</td>
         <td>${e.event_date ? new Date(e.event_date).toLocaleDateString() : "—"}</td>
         <td>${e.house_count}</td>
         <td>
-          <button class="btn-sm" onclick="openEvent('${esc(e.id)}','${esc(e.name)}')">Open</button>
+          <button class="btn-sm" onclick="openMapForEvent('${esc(e.id)}')">Map</button>
+          <button class="btn-sm" onclick="openEvent('${esc(e.id)}', this.closest('tr').dataset.name)" style="margin-left:4px;">Houses</button>
           <button class="btn-sm" onclick="editEvent('${esc(e.id)}')" style="margin-left:4px;">Edit</button>
           <button class="btn-sm" onclick="duplicateEvent('${esc(e.id)}')" style="margin-left:4px;">Duplicate</button>
           <button class="btn-sm btn-danger" onclick="deleteEvent('${esc(e.id)}','${esc(e.name)}')" style="margin-left:4px;">Delete</button>
@@ -1438,10 +1560,15 @@ document.getElementById("event-form").onsubmit = async (e) => {
   const body = Object.fromEntries(fd);
   if (body.event_date) body.event_date = new Date(body.event_date).toISOString();
   else delete body.event_date;
-  await authFetch(API + "/api/events/", {
+  const r = await authFetch(API + "/api/events/", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (r.ok) {
+    const ev = await r.json();
+    _setWorkingEventId(ev.id);  // the map and dashboard open on the new event
+    _flashStatus(`Created "${ev.name}". Next: click Map to add houses.`, 5000);
+  }
   e.target.reset();
   loadEvents();
 };
@@ -1451,6 +1578,7 @@ async function openEvent(id, name) {
   currentEventName = name;
   document.getElementById("event-detail-title").textContent = name;
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".nav-links a").forEach(a => a.classList.toggle("active", a.dataset.page === "events"));
   document.getElementById("page-event-detail").classList.add("active");
   loadEventHouses();
 }
@@ -1486,120 +1614,18 @@ async function loadEventHouses() {
   const houses = await r.json();
   _eventHousesCache = houses;
   const el = document.getElementById("event-houses-list");
-  if (!houses.length) { el.innerHTML = "<p>No houses assigned. Use Walk Groups or Manual Assign to add houses.</p>"; return; }
+  if (!houses.length) { el.innerHTML = "<p>No houses yet. Click <strong>Edit on Map</strong> to add some.</p>"; return; }
   el.innerHTML = _renderGroupedHouses(houses, { openByDefault: true });
 }
 
-document.getElementById("assign-form").onsubmit = async (e) => {
-  e.preventDefault();
-  const fd = new FormData(e.target);
-  const body = {};
-  const zips = fd.get("zip_codes");
-  if (zips) body.zip_codes = zips.split(",").map(s => s.trim());
-  const streets = fd.get("street_names");
-  if (streets) body.street_names = streets.split(",").map(s => s.trim());
-  const limit = fd.get("limit");
-  if (limit) body.limit = parseInt(limit);
-  const assigned = fd.get("assigned_to");
-  if (assigned) body.assigned_to = assigned;
-  await authFetch(API + `/api/events/${currentEventId}/assign`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  e.target.reset();
-  loadEventHouses();
-};
-
-// --- Walk Groups ---
-async function loadWalkGroupEvents() {
-  const sel = document.getElementById("wg-event-select");
-  try {
-    const r = await authFetch(API + "/api/events/");
-    if (!r.ok) { sel.innerHTML = '<option value="">Failed to load events</option>'; return; }
-    const events = await r.json();
-    if (!events.length) {
-      sel.innerHTML = '<option value="">No events — create one first</option>';
-      return;
-    }
-    sel.innerHTML = '<option value="">Select an event…</option>' +
-      events.map(ev => {
-        const selected = String(ev.id) === String(currentEventId) ? " selected" : "";
-        return `<option value="${esc(ev.id)}"${selected}>${esc(ev.name)} (${ev.house_count} houses)</option>`;
-      }).join("");
-    if (currentEventId) loadWalkGroupList();
-  } catch (err) {
-    sel.innerHTML = '<option value="">Error loading events</option>';
-  }
-}
-
-document.getElementById("wg-event-select").onchange = (e) => {
-  currentEventId = e.target.value;
-  const opt = e.target.options[e.target.selectedIndex];
-  currentEventName = opt.textContent;
-  if (currentEventId) loadWalkGroupList();
-  else document.getElementById("wg-groups-list").innerHTML = "";
-};
-
-document.getElementById("walk-group-form").onsubmit = async (e) => {
-  e.preventDefault();
-  if (!currentEventId) { alert("Select an event first."); return; }
-  if (!confirm("This will organize all houses assigned to this event into walk groups by street.\n\nExisting group labels will be overwritten.\n\nContinue?")) return;
-  const fd = new FormData(e.target);
-  const body = {
-    group_size: parseInt(fd.get("group_size") || "20"),
-  };
-  const resultEl = document.getElementById("walk-group-result");
-  resultEl.classList.remove("hidden");
-  resultEl.textContent = "Generating groups…";
-  try {
-    const r = await authFetch(API + `/api/events/${currentEventId}/walk-groups`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await r.json();
-    if (r.ok && data.groups?.length) {
-      resultEl.innerHTML = `<strong>${data.groups.length} groups created (${data.total_assigned} houses)</strong>` +
-        `<ul>` + data.groups.map(g => `<li>${g.label} — ${g.houses} houses</li>`).join("") + `</ul>`;
-      loadWalkGroupList();
-    } else if (r.ok) {
-      resultEl.textContent = data.message || "No houses assigned to this event yet.";
-    } else {
-      resultEl.textContent = "Error: " + (data.detail || JSON.stringify(data));
-    }
-  } catch (err) {
-    resultEl.textContent = "Network error: " + err.message;
-  }
-};
-
-async function loadWalkGroupList() {
-  if (!currentEventId) return;
-  const el = document.getElementById("wg-groups-list");
-  el.innerHTML = '<p class="loading-text">Loading groups…</p>';
-  try {
-    const r = await authFetch(API + `/api/events/${currentEventId}/houses`);
-    if (!r.ok) {
-      el.innerHTML = `<p>Failed to load groups (HTTP ${r.status}).</p>`;
-      return;
-    }
-    const houses = await r.json();
-    _eventHousesCache = houses;
-    if (!Array.isArray(houses) || !houses.length) {
-      el.innerHTML = "<p>No groups yet. Generate walk groups above.</p>";
-      return;
-    }
-    el.innerHTML = _renderGroupedHouses(houses);
-  } catch (err) {
-    el.innerHTML = `<p>Error loading groups: ${err.message}</p>`;
-  }
-}
-
 function exportWalkGroupsCSV() {
-  if (!currentEventId) { alert("Select an event first."); return; }
-  if (!_eventHousesCache.length) { alert("No walk groups to export."); return; }
+  if (!_mapEventHouses.length) { alert("No walk groups to export."); return; }
   exportCSV("walk-groups.csv",
     ["Group", "Address", "Owner", "ZIP", "Status"],
-    _eventHousesCache.map(eh => [
-      eh.assigned_to || "Unassigned", eh.house.full_address,
+    [..._mapEventHouses]
+      .sort((a, b) => _naturalCompare(a.assigned_to || "~", b.assigned_to || "~"))
+      .map(eh => [
+      eh.assigned_to || NO_GROUP, eh.house.full_address,
       eh.house.owner_name || "", eh.house.zip_code || "", eh.status,
     ])
   );
@@ -1690,7 +1716,6 @@ document.getElementById("visit-form").onsubmit = async (e) => {
   closeVisitModal();
   // Refresh whichever list is active
   if (document.getElementById("page-event-detail").classList.contains("active")) loadEventHouses();
-  if (document.getElementById("page-walk-groups").classList.contains("active")) loadWalkGroupList();
 };
 
 // --- Print packet ---
@@ -1724,16 +1749,16 @@ async function checkArcGISCount() {
   } catch { el.textContent = ""; }
 }
 
-async function loadArcGISEventSelect() {
-  const sel = document.getElementById("arcgis-event-select");
-  if (!sel) return;
-  try {
-    const r = await authFetch(API + "/api/events/");
-    if (!r.ok) return;
-    const events = await r.json();
-    sel.innerHTML = '<option value="">No event (import only)</option>' +
-      events.map(ev => `<option value="${esc(ev.id)}">${esc(ev.name)}</option>`).join("");
-  } catch (_) { /* keep default */ }
+/** Imports run in the background. Poll until one finishes and return its record. */
+async function _waitForImport(importId) {
+  for (let i = 0; i < 300; i++) {  // up to ~10 minutes
+    await new Promise(res => setTimeout(res, 2000));
+    const r = await authFetch(API + `/api/imports/${importId}`);
+    if (!r.ok) continue;
+    const imp = await r.json();
+    if (imp.status === "completed" || imp.status === "failed") return imp;
+  }
+  throw new Error("The import is taking a long time. Check Import Data for its status.");
 }
 
 document.getElementById("arcgis-form").onsubmit = async (e) => {
@@ -1746,8 +1771,6 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
     notes: fd.get("notes") || undefined,
   };
   if (zips) body.zip_codes = zips.split(",").map(s => s.trim()).filter(Boolean);
-  const eventId = fd.get("event_id");
-  if (eventId) body.event_id = eventId;
   document.getElementById("arcgis-progress").classList.remove("hidden");
   document.getElementById("arcgis-status").textContent = "connecting…";
   _showStatus("Fetching parcels from ArcGIS…");
@@ -1759,10 +1782,13 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
     });
     const data = await r.json();
     if (r.ok) {
-      let msg = `Done! Fetched ${data.fetched} parcels, imported ${data.imported} records.`;
-      if (data.assigned) msg += ` ${data.assigned} houses assigned to "${data.event_name}" — ready for walk groups.`;
+      document.getElementById("arcgis-status").textContent = "running…";
+      const imp = await _waitForImport(data.import_id);
+      const msg = imp.status === "failed"
+        ? "Import failed. See Import History below."
+        : `Done! Imported ${imp.record_count} records. Add them to an event on the Map.`;
       document.getElementById("arcgis-status").textContent = msg;
-      _flashStatus(`Imported ${data.imported} records from ArcGIS.`);
+      _flashStatus(msg);
     } else {
       document.getElementById("arcgis-status").textContent =
         `Error: ${data.detail || "unknown"}`;
@@ -1777,18 +1803,6 @@ document.getElementById("arcgis-form").onsubmit = async (e) => {
 };
 
 // --- Imports ---
-async function loadImportEventSelect() {
-  const sel = document.getElementById("import-event-select");
-  if (!sel) return;
-  try {
-    const r = await authFetch(API + "/api/events/");
-    if (!r.ok) return;
-    const events = await r.json();
-    sel.innerHTML = '<option value="">No event (import only)</option>' +
-      events.map(ev => `<option value="${esc(ev.id)}">${esc(ev.name)}</option>`).join("");
-  } catch (_) { /* keep default option */ }
-}
-
 document.getElementById("import-form").onsubmit = async (e) => {
   e.preventDefault();
   if (!confirm("This will import addresses and add/update houses in the database.\n\nExisting house data will not be overwritten.\n\nContinue?")) return;
@@ -1800,13 +1814,13 @@ document.getElementById("import-form").onsubmit = async (e) => {
     const r = await authFetch(API + "/api/imports/", { method: "POST", body: fd });
     const data = await r.json();
     if (r.ok) {
-      let msg = `Done! ${data.record_count} records imported.`;
-      if (data.notes && data.notes.includes("Auto-assigned")) {
-        const match = data.notes.match(/Auto-assigned (\d+) houses to event: (.+)/);
-        if (match) msg += ` ${match[1]} houses assigned to "${match[2]}" — you can now create walk groups.`;
-      }
+      document.getElementById("import-status").textContent = "processing…";
+      const imp = await _waitForImport(data.id);
+      const msg = imp.status === "failed"
+        ? "Import failed. See Import History below."
+        : `Done! Imported ${imp.record_count} records. Add them to an event on the Map.`;
       document.getElementById("import-status").textContent = msg;
-      _flashStatus(`Imported ${data.record_count} records.`);
+      _flashStatus(msg);
     } else {
       document.getElementById("import-status").textContent = `Error: ${data.detail || "unknown"}`;
     }
@@ -1929,56 +1943,107 @@ document.getElementById("manual-house-form").onsubmit = async (e) => {
 };
 
 // --- Roster ---
+let _rosterCache = [];
 async function loadRoster() {
   document.getElementById("roster-list").innerHTML = '<div class="loading-bar"></div>';
   const r = await authFetch(API + "/api/scout/roster");
   const roster = await r.json();
+  _rosterCache = roster;
+
+  const missing = roster.filter(s => s.active && !s.has_password).length;
+  document.getElementById("roster-missing-passwords").innerHTML = missing
+    ? `<div class="card card-highlight">${missing} active scout(s) don't have a password yet, so they can't sign in.
+        <button class="btn-sm" onclick="generateMissingPasswords()" style="margin-left:8px;">Create passwords</button></div>`
+    : "";
+
   document.getElementById("roster-list").innerHTML = roster.length
     ? `<table><tr><th>Name</th><th>Scout ID</th><th>Status</th><th>Password</th><th></th></tr>` +
       roster.map(s => `<tr>
         <td>${esc(s.name)}</td>
         <td>${esc(s.scout_id) || "—"}</td>
         <td><span class="badge badge-${s.active ? "completed" : "pending"}">${s.active ? "Active" : "Inactive"}</span></td>
-        <td>${s.has_password
-          ? '<span class="badge badge-completed">Set</span> <button class="btn-sm" onclick="clearScoutPassword(\'' + esc(s.id) + '\')">Clear</button>'
-          : '<span class="badge badge-pending">None</span>'
-        }</td>
+        <td>${s.has_password ? '<span class="badge badge-completed">Set</span>' : '<span class="badge badge-pending">None</span>'}</td>
         <td>
-          <button class="btn-sm" onclick="promptScoutPassword('${esc(s.id)}', '${esc(s.name)}')">Set Password</button>
+          <button class="btn-sm" onclick="regenerateScoutPassword('${esc(s.id)}')">New password</button>
           <button class="btn-sm" onclick="toggleRosterScout('${esc(s.id)}')">${s.active ? "Deactivate" : "Activate"}</button>
           <button class="btn-sm btn-danger" onclick="deleteRosterScout('${esc(s.id)}')">Delete</button>
         </td>
       </tr>`).join("") + `</table>`
     : "<p>No scouts in roster. Add scouts above.</p>";
 }
-async function promptScoutPassword(rosterId, name) {
-  const pw = prompt("Set password for " + name + " (min 4 characters):");
-  if (!pw) return;
-  if (pw.length < 4) { alert("Password must be at least 4 characters."); return; }
+
+// Passwords are only visible right after they're created, so show them prominently
+let _newPasswords = [];
+function showNewPasswords(list, heading) {
+  const el = document.getElementById("roster-new-passwords");
+  _newPasswords = list;
+  if (!list.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  el.classList.remove("hidden");
+  el.innerHTML = `<h3>${esc(heading)}</h3>
+    <p class="help-text">Write these down, print them, or download them now. They won't be shown again.</p>
+    <table><tr><th>Scout</th><th>Password</th></tr>` +
+    list.map(p => `<tr><td>${esc(p.name)}</td><td><code style="font-size:18px;letter-spacing:3px;">${esc(p.password)}</code></td></tr>`).join("") +
+    `</table>
+    <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="btn-sm" onclick="printNewPasswords()">Print</button>
+      <button class="btn-sm" onclick="exportCSV('scout-passwords.csv', ['name', 'password'], _newPasswords.map(p => [p.name, p.password]))">Download CSV</button>
+      <button class="btn-sm btn-quiet" onclick="showNewPasswords([])">Done</button>
+    </div>`;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function printNewPasswords() {
+  const w = window.open("", "_blank");
+  if (!w) { alert("Allow pop-ups to print, or use Download CSV."); return; }
+  w.document.write(`<!doctype html><title>Scout passwords</title>
+    <style>body{font-family:sans-serif;padding:24px}td,th{border:1px solid #999;padding:10px 16px;text-align:left}
+    table{border-collapse:collapse}code{font-size:20px;letter-spacing:3px}</style>
+    <h2>ScoutMap passwords</h2><p>Sign in at ${esc(location.origin)}/scout</p>
+    <table><tr><th>Scout</th><th>Password</th></tr>` +
+    _newPasswords.map(p => `<tr><td>${esc(p.name)}</td><td><code>${esc(p.password)}</code></td></tr>`).join("") +
+    `</table>`);
+  w.document.close();
+  w.focus();
+  w.print();
+}
+
+async function regenerateScoutPassword(rosterId) {
+  const scout = _rosterCache.find(s => s.id === rosterId);
+  if (!scout) return;
+  if (scout.has_password && !confirm(`Make a new password for ${scout.name}?\n\nTheir old password will stop working and they'll be signed out.`)) return;
   try {
-    const r = await authFetch(API + "/api/auth/scout-password/" + rosterId, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: pw }),
-    });
-    if (r.ok) { loadRoster(); }
-    else { const d = await r.json(); alert(d.detail || "Error setting password."); }
+    const r = await authFetch(API + `/api/auth/scout-password/${rosterId}/regenerate`, { method: "POST" });
+    const d = await r.json();
+    if (!r.ok) { alert(d.detail || "Error creating password."); return; }
+    showNewPasswords([d], `New password for ${d.name}`);
+    loadRoster();
   } catch (err) { alert("Network error: " + err.message); }
 }
-async function clearScoutPassword(rosterId) {
-  if (!confirm("Clear this scout's password? They won't be able to log in until a new one is set.")) return;
+
+async function generateMissingPasswords() {
   try {
-    const r = await authFetch(API + "/api/auth/scout-password/" + rosterId, { method: "DELETE" });
-    if (r.ok) { loadRoster(); }
-    else { const d = await r.json(); alert(d.detail || "Error clearing password."); }
+    const r = await authFetch(API + "/api/auth/scout-passwords/generate-missing", { method: "POST" });
+    const d = await r.json();
+    if (!r.ok) { alert(d.detail || "Error creating passwords."); return; }
+    showNewPasswords(d.passwords, "New scout passwords");
+    loadRoster();
   } catch (err) { alert("Network error: " + err.message); }
 }
+
 document.getElementById("roster-form").onsubmit = async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
-  await authFetch(API + "/api/scout/roster", {
+  const r = await authFetch(API + "/api/scout/roster", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: fd.get("name"), scout_id: fd.get("scout_id") || null }),
   });
+  if (r.ok) {
+    const scout = await r.json();
+    showNewPasswords([scout], `Password for ${scout.name}`);
+  } else {
+    const d = await r.json().catch(() => ({}));
+    alert(d.detail || "Error adding scout.");
+  }
   e.target.reset();
   loadRoster();
   _visitRosterLoaded = false;
@@ -2016,6 +2081,7 @@ document.getElementById("roster-import-form").onsubmit = async (e) => {
     const data = await r.json();
     if (r.ok) {
       statusEl.textContent = `Done! ${data.added} scout(s) added, ${data.skipped} skipped (duplicates or empty).`;
+      showNewPasswords(data.passwords || [], "Passwords for imported scouts");
       e.target.reset();
       loadRoster();
       _visitRosterLoaded = false;

@@ -13,6 +13,7 @@ from app.models import MasterHouse, HouseSourceLink, EventHouse, Visit, Unmatche
 from app.schemas import MasterHouseOut, MasterHouseCreate
 from app.address import normalize_address, parse_address_parts
 from app.routes.auth import require_admin
+from app.routes.events import move_to_group
 
 # Admin-only: scouts never need these endpoints
 router = APIRouter(prefix="/api/houses", tags=["houses"], dependencies=[Depends(require_admin)])
@@ -220,6 +221,7 @@ def houses_in_polygon(body: PolygonQueryRequest, _admin: str = Depends(require_a
 
     # Optionally assign to event
     assigned = 0
+    regrouped = 0
     if body.event_id and inside_ids:
         event = db.query(FundraiserEvent).filter(FundraiserEvent.id == body.event_id).first()
         if not event:
@@ -245,12 +247,14 @@ def houses_in_polygon(body: PolygonQueryRequest, _admin: str = Depends(require_a
                     assigned_to=body.assigned_to,
                 ))
                 assigned += 1
+        regrouped = move_to_group(db, event.id, already, body.assigned_to)
         db.commit()
 
     return {
         "count": len(inside_ids),
         "house_ids": [str(hid) for hid in inside_ids],
         "assigned": assigned,
+        "regrouped": regrouped,
     }
 
 

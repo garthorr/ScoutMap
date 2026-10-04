@@ -42,31 +42,17 @@ docker compose up --build
 
 The database is created automatically on first startup.
 
-## Three-Phase Workflow
+## Workflow
 
-The app organizes work into three phases:
+The **Dashboard** shows a step-by-step checklist for the selected event and highlights the next step.
 
-### Phase 1: Prepare
+1. **Create an event** (Events page)
+2. **Add houses on the map** — pick the event at the top of the Map page, click **Boundary**, draw around the area to walk, then click **Add to event** (or **Import from ArcGIS** if houses are missing; it adds them to the event too). Type a group name first to put them straight into a walk group.
+3. **Make walk groups** — click **Make groups** below the map. Houses are grouped by street and sorted by address number. Houses already in a group keep it unless you tick **Redo all groups**.
+4. **Add scouts** (Scouts page) — each scout gets a random 6-digit password, shown once. Print or download it; click **New password** if one is lost.
+5. **Send scouts out** — share the scout app link (`/scout`), then follow progress on **Scout Data**.
 
-1. **Create a fundraiser event** (Events page)
-2. **Import house data** using any of these methods:
-   - **ArcGIS fetch** — enter ZIP codes, see record count preview, fetch directly from Dallas ArcGIS
-   - **Polygon boundary** — draw a polygon on the map, import all ArcGIS parcels within it (no ZIP needed)
-   - **File upload** — upload Dallas GIS or DCAD CSV files
-3. **Assign houses to an event** — can be done during import (select event in the import form) or later via the Events page
-4. **Add scouts to the roster** — individually or via CSV import
-5. **Use the map** — view imported houses, draw boundaries, select by box or street
-
-### Phase 2: Organize
-
-1. **Generate walk groups** — houses auto-grouped by street, sorted by address number
-2. **Review houses** — search, filter, manage the master house list
-
-### Phase 3: Collect
-
-1. **Share the scout app URL** (`/scout`) with scouts
-2. **Monitor progress** — Scout Data page shows per-scout stats and all visit records
-3. **Export data** — all tables exportable as CSV
+**Import Data** is for bulk-loading houses into the database (by ZIP code or file). Adding houses to an event always happens on the map.
 
 ## Two Apps, One System
 
@@ -74,24 +60,23 @@ The app organizes work into three phases:
 
 The admin interface for troop leaders:
 
-| Page | Phase | Purpose |
-|------|-------|---------|
-| **Dashboard** | — | Aggregate stats, phase progress, quick links |
-| **Events** | Prepare | Create events, assign houses |
-| **Import Data** | Prepare | ArcGIS fetch, file upload, import history, unmatched records |
-| **Map** | Prepare | Interactive map with tools: pointer, box select, add house, polygon boundary |
-| **Scouts** | Prepare | Manage roster, import/export CSV, set passwords |
-| **Houses** | Organize | Search and manage master house list |
-| **Walk Groups** | Organize | Auto-generate walkable groups by street |
+| Page | Menu | Purpose |
+|------|------|---------|
+| **Dashboard** | — | Next-step checklist for an event, overall totals |
+| **Events** | Plan | Create, edit, duplicate events; house list and print packet |
+| **Map** | Plan | Add houses to the event (boundary, box select), make and edit walk groups |
+| **Scouts** | Plan | Manage roster, import/export CSV, generate passwords |
+| **Scout Form** | Plan | Customize the form scouts fill in at each house |
 | **Scout Data** | Collect | View, aggregate, and export field data |
-| **Scout Form** | Collect | Customize dynamic form fields for scouts |
-| **Settings** | — | Auth, email allowlist, configuration |
+| **Houses** | Data | Search and manage the master house list |
+| **Import Data** | Data | Bulk ArcGIS fetch by ZIP, file upload, import history, unmatched records |
+| **Settings** | — | Auth, email allowlist |
 
 ### Scout App (`/scout`)
 
 A mobile/tablet-optimized field entry app:
 
-1. **Select identity** — pick name from roster dropdown or write in
+1. **Sign in** — pick name ("First L.") and enter the 6-digit password
 2. **Pick walk group** — select event and assigned group
 3. **Record visits** — door answer, donation, former scout, avoid house, custom fields, notes
 4. **Progress tracking** — progress bar shows completion within the group
@@ -101,24 +86,19 @@ A mobile/tablet-optimized field entry app:
 
 ### Three Ways to Import
 
-**1. ArcGIS Fetch (Recommended)**
-- Enter ZIP codes in the Import Data page
-- Live record count preview shows how many parcels are available before fetching
-- Optionally select an event to auto-assign imported houses
-- Pulls addresses, owner names, parcel IDs, and coordinates directly from Dallas ArcGIS
-
-**2. Polygon Boundary Import (Map-based)**
-- Open the Map page, click **Boundary** tool
+**1. Polygon Boundary Import (Map — main path)**
+- Pick the event at the top of the Map page, click the **Boundary** tool
 - Click to draw a polygon following streets/alleys
 - Shows both local house count and ArcGIS parcel count for the boundary
-- Click **Import from ArcGIS** to fetch all parcels within the polygon — no ZIP code needed
-- Delete boundary houses directly from the boundary panel
-- Optionally assign to an event and group label in one step
+- Click **Import from ArcGIS** to fetch all parcels within the polygon — no ZIP code needed. Everything inside the boundary is then added to the selected event (and group, if you typed one)
 
-**3. File Upload**
+**2. ArcGIS Fetch by ZIP (Import Data page)**
+- Enter ZIP codes; a live count shows how many parcels are available
+- Loads houses into the database only; add them to an event on the map
+
+**3. File Upload (Import Data page)**
 - Upload CSV/GeoJSON from Dallas GIS or DCAD
-- Select source type and optionally an event
-- Imported houses are automatically assigned to the selected event
+- Loads houses into the database only; add them to an event on the map
 
 ### Import Pipeline
 
@@ -128,7 +108,6 @@ Each import method runs the same pipeline:
 3. Create or enrich the house record
 4. Create a `house_source_link` with full provenance
 5. Unmatched records go to the review queue
-6. If an event was selected, create `event_house` assignments
 
 ### Supported Sources
 
@@ -155,10 +134,11 @@ When multiple sources cover the same address, records are matched by normalized 
 The interactive map (Leaflet) includes:
 
 - **Zoom-based loading** — lightweight dots at low zoom (fast rendering of thousands of houses), full detail with popups at high zoom
-- **Polygon boundary tool** — draw boundaries, count houses, import from ArcGIS, assign to events, delete
-- **Box select** — drag to select houses, assign to events or delete selected
+- **Event picker** — one choice at the top drives every tool on the page, and is remembered
+- **Polygon boundary tool** — draw boundaries, count houses, import from ArcGIS, add to the event (optionally into a named group), delete
+- **Box select** — drag to select houses, add them to the event or move them into a named group, or delete them
 - **Add tool** — click map to place a new house manually
-- **Walk group overlay** — select event to see color-coded walk routes
+- **Walk groups** — color-coded routes on the map; make, rename, merge, or remove groups in the panel below it
 
 Touch/tablet support: all tools work with touch events, minimum 44px tap targets.
 
@@ -180,7 +160,7 @@ Alex Johnson,
 
 - Header row required, extra columns ignored
 - Duplicate names (case-insensitive) skipped during import
-- Passwords are set via the admin UI only (never from CSV)
+- Each imported scout gets a random 6-digit password, shown once after the import (print or download it)
 
 ## Data Model
 
@@ -215,7 +195,7 @@ The app supports two authentication methods:
 - **Admin password** — set via `ADMIN_PASSWORD` env var, provides full admin access
 - **Email OTP** — admin configures allowed emails/patterns (e.g., `*@troop123.org`), users receive a 6-digit code via SMTP
 
-Scout accounts use passwords set by the admin (minimum 6 characters).
+Scout accounts use random 6-digit passwords generated by the server. Only a hash is stored, so a password is shown once; the admin can make a new one at any time (this signs the scout out).
 
 ## API Endpoints
 
@@ -249,8 +229,8 @@ Scout accounts use passwords set by the admin (minimum 6 characters).
 |--------|----------|-------------|
 | `POST` | `/api/events/` | Create a fundraiser event |
 | `GET` | `/api/events/` | List events with house counts |
-| `POST` | `/api/events/{id}/assign` | Assign houses to event by ZIP/street filter |
-| `POST` | `/api/events/{id}/walk-groups` | Generate walk groups by street |
+| `POST` | `/api/events/{id}/assign` | Add houses to event (by IDs or ZIP/street); with `assigned_to`, also moves houses already in the event into that group |
+| `POST` | `/api/events/{id}/walk-groups` | Generate walk groups by street (`keep_existing` defaults to true) |
 | `GET` | `/api/events/{id}/houses` | List event houses with details |
 | `POST` | `/api/events/{id}/houses/{ehId}/visits` | Record a visit |
 
@@ -259,8 +239,8 @@ Scout accounts use passwords set by the admin (minimum 6 characters).
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/scout/roster` | List scout roster |
-| `POST` | `/api/scout/roster` | Add scout to roster |
-| `POST` | `/api/scout/roster/import` | Import roster from CSV |
+| `POST` | `/api/scout/roster` | Add scout to roster (returns the new password once) |
+| `POST` | `/api/scout/roster/import` | Import roster from CSV (returns new passwords once) |
 | `GET` | `/api/scout/events` | List events with walk group labels |
 | `GET` | `/api/scout/events/{id}/houses` | Houses in a walk group |
 | `GET` | `/api/scout/data` | All scout visit records |
@@ -274,7 +254,10 @@ Scout accounts use passwords set by the admin (minimum 6 characters).
 | `POST` | `/api/auth/request-code` | Request email OTP |
 | `POST` | `/api/auth/verify-code` | Verify OTP and create session |
 | `POST` | `/api/auth/scout-login` | Scout password login |
+| `POST` | `/api/auth/scout-password/{id}/regenerate` | Give a scout a new random password |
+| `POST` | `/api/auth/scout-passwords/generate-missing` | Give every scout without a password a new one |
 | `GET` | `/api/stats/` | Dashboard statistics |
+| `GET` | `/api/stats/checklist?event_id=` | Dashboard checklist numbers for one event |
 | `GET/POST` | `/api/form-fields/` | Manage custom scout form fields |
 
 ## Pluggable Importer Architecture

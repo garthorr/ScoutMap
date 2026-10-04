@@ -1,10 +1,12 @@
 """Event endpoints – create events and assign houses."""
 
 import json
+import re
+import uuid
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_
 from typing import Optional
@@ -133,7 +135,7 @@ def delete_event(
 
 
 @router.post("/{event_id}/assign", response_model=dict)
-def assign_houses(event_id: str, body: EventAssignRequest, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
+def assign_houses(event_id: uuid.UUID, body: EventAssignRequest, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     """Generate event assignments from imported master houses."""
     event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
     if not event:
@@ -180,20 +182,42 @@ def assign_houses(event_id: str, body: EventAssignRequest, _admin: str = Depends
             ))
             added += 1
 
+    regrouped = move_to_group(db, event.id, existing_ids, body.assigned_to)
     db.commit()
     total = db.query(func.count(EventHouse.id)).filter(
         EventHouse.event_id == event.id
     ).scalar() or 0
-    return {"assigned": added, "total_in_event": total}
+    return {"assigned": added, "regrouped": regrouped, "total_in_event": total}
+
+
+def move_to_group(db: Session, event_id, house_ids, label: Optional[str]) -> int:
+    """Put houses already in the event into the named group (map selection with a group name)."""
+    label = (label or "").strip()
+    if not label or not house_ids:
+        return 0
+    ids = list(house_ids)
+    moved = 0
+    for i in range(0, len(ids), 500):
+        moved += (
+            db.query(EventHouse)
+            .filter(
+                EventHouse.event_id == event_id,
+                EventHouse.house_id.in_(ids[i:i + 500]),
+                or_(EventHouse.assigned_to.is_(None), EventHouse.assigned_to != label),
+            )
+            .update({"assigned_to": label}, synchronize_session=False)
+        )
+    return moved
 
 
 class WalkGroupRequest(BaseModel):
-    group_size: int = 20                          # houses per group
+    group_size: int = Field(20, ge=1, le=500)     # houses per group
+    keep_existing: bool = True                    # only group houses not already in a group
 
 
 @router.post("/{event_id}/walk-groups")
 def create_walk_groups(
-    event_id: str,
+    event_id: uuid.UUID,
     body: WalkGroupRequest,
     _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -203,26 +227,38 @@ def create_walk_groups(
     Uses the houses already assigned to the event (EventHouse rows).
     Groups by street name, sorts by address number so scouts walk
     in order, then splits each street into chunks of ``group_size``.
-    Each chunk becomes a numbered group label.
+    Each chunk becomes a numbered group label. By default, houses that
+    already have a group (e.g. drawn on the map) keep it.
     """
     event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
     if not event:
         raise HTTPException(404, "Event not found")
 
-    # Fetch all EventHouse rows for this event with eager-loaded MasterHouse
-    event_houses = (
+    all_houses = (
         db.query(EventHouse)
-        .join(MasterHouse, EventHouse.house_id == MasterHouse.id)
         .options(joinedload(EventHouse.house))
-        .filter(
-            EventHouse.event_id == event.id,
-            MasterHouse.street_name.isnot(None),
-        )
+        .filter(EventHouse.event_id == event.id)
         .all()
     )
+    if not all_houses:
+        return {"groups": [], "total_assigned": 0, "kept": 0, "skipped_no_street": 0,
+                "message": "No houses in this event yet. Add houses on the map first."}
 
+    # Houses already in a group are left alone unless the admin asked to redo everything
+    existing_labels = {eh.assigned_to for eh in all_houses if eh.assigned_to}
+    if body.keep_existing:
+        candidates = [eh for eh in all_houses if not eh.assigned_to]
+        kept = len(all_houses) - len(candidates)
+    else:
+        candidates = all_houses
+        kept = 0
+        existing_labels = set()
+
+    event_houses = [eh for eh in candidates if eh.house and eh.house.street_name]
+    skipped_no_street = len(candidates) - len(event_houses)
     if not event_houses:
-        return {"groups": [], "total_assigned": 0, "message": "No houses assigned to this event yet. Assign houses first."}
+        return {"groups": [], "total_assigned": 0, "kept": kept, "skipped_no_street": skipped_no_street,
+                "message": "Every house is already in a group." if kept else "No houses with a street name to group."}
 
     # Group by street, sort within each street by address number
     by_street: dict[str, list] = defaultdict(list)
@@ -237,8 +273,12 @@ def create_walk_groups(
         by_street[street].sort(key=lambda x: _addr_sort_key(x["house"].address_number))
 
     # Build groups: chunk each street into group_size, label them
+    # Continue numbering after any groups that are being kept
     groups = []
-    group_num = 1
+    group_num = 1 + max(
+        (int(m.group(1)) for m in (re.match(r"Group (\d+)", label) for label in existing_labels) if m),
+        default=0,
+    )
     for street in sorted(by_street.keys()):
         street_items = by_street[street]
         for i in range(0, len(street_items), body.group_size):
@@ -260,7 +300,8 @@ def create_walk_groups(
         group_summaries.append({"label": g["label"], "houses": len(g["event_houses"])})
 
     db.commit()
-    return {"groups": group_summaries, "total_assigned": len(event_houses)}
+    return {"groups": group_summaries, "total_assigned": len(event_houses),
+            "kept": kept, "skipped_no_street": skipped_no_street}
 
 
 def _addr_sort_key(addr_num: str | None) -> int:

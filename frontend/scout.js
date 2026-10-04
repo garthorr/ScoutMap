@@ -287,7 +287,7 @@ document.getElementById("event-select").onchange = (e) => {
     groupSel.innerHTML = '<option value="">No walk groups</option>';
   } else {
     groupSel.innerHTML = '<option value="">Select a group...</option>' +
-      groups.map(g => `<option value="${g}">${g}</option>`).join("");
+      groups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join("");
   }
   checkReady();
 };
