@@ -29,7 +29,8 @@ from app.routes.auth import require_admin
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/arcgis", tags=["arcgis"])
+# Admin-only: scouts never need these endpoints
+router = APIRouter(prefix="/api/arcgis", tags=["arcgis"], dependencies=[Depends(require_admin)])
 
 ARCGIS_QUERY = (
     "https://services2.arcgis.com/rwnOSbfKSwyTBcwN"

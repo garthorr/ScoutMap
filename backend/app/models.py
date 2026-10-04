@@ -257,6 +257,7 @@ class AuthCode(Base):
     code = Column(String(6), nullable=False)
     expires_at = Column(DateTime, nullable=False)
     used = Column(Boolean, default=False)
+    failed_attempts = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

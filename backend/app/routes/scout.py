@@ -15,7 +15,7 @@ from app.database import get_db
 from app.models import (
     FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster,
 )
-from app.routes.auth import _hash_password, require_admin
+from app.routes.auth import _hash_password, _short_name, get_current_user, require_admin
 
 router = APIRouter(prefix="/api/scout", tags=["scout"])
 
@@ -40,12 +40,19 @@ class RosterOut(BaseModel):
 
 
 @router.get("/roster", response_model=list[RosterOut])
-def list_roster(active_only: bool = False, db: Session = Depends(get_db)):
+def list_roster(
+    active_only: bool = False,
+    user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Scouts only see "First L." — full names are for admins
+    is_scout = user.startswith("scout:")
     q = db.query(ScoutRoster)
     if active_only:
         q = q.filter(ScoutRoster.active == True)  # noqa: E712
     return [
-        RosterOut(id=str(s.id), name=s.name, scout_id=s.scout_id, active=s.active,
+        RosterOut(id=str(s.id), name=_short_name(s.name) if is_scout else s.name,
+                  scout_id=None if is_scout else s.scout_id, active=s.active,
                   has_password=bool(s.password_hash))
         for s in q.order_by(ScoutRoster.name).all()
     ]
@@ -213,6 +220,7 @@ def list_group_houses(
 @router.get("/data")
 def scout_data(
     event_id: Optional[str] = None,
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return all visit data entered by scouts, with house/event info."""
@@ -258,6 +266,7 @@ def scout_data(
 @router.get("/data/summary")
 def scout_data_summary(
     event_id: Optional[str] = None,
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Aggregate stats for scout data using SQL GROUP BY."""
