@@ -41,14 +41,19 @@ class VerifyCodeBody(BaseModel):
 def _is_email_allowed(email: str, db: Session) -> bool:
     """Check if email matches any allowed pattern in the database."""
     email = email.strip().lower()
-    patterns = [row.email for row in db.query(AllowedEmail.email).all()]
-    for pattern in patterns:
-        p = pattern.strip().lower()
-        if p == email:
-            return True
-        if "*" in p and fnmatch(email, p):
-            return True
-    return False
+    # Exact match uses the index; only wildcard patterns need checking in Python
+    if db.query(AllowedEmail.id).filter(AllowedEmail.email == email).first():
+        return True
+    patterns = db.query(AllowedEmail.email).filter(AllowedEmail.email.contains("*")).all()
+    return any(fnmatch(email, row.email.strip().lower()) for row in patterns)
+
+
+def _short_name(name: str) -> str:
+    """'Jane Doe' -> 'Jane D.' (protects minors' full names)."""
+    parts = (name or "").split()
+    if len(parts) < 2:
+        return name or ""
+    return f"{parts[0]} {parts[-1][0].upper()}."
 
 
 def _generate_code() -> str:
@@ -148,6 +153,7 @@ _RATE_LIMIT_MAX = 10      # max attempts per window
 
 
 _rate_limit_last_cleanup = 0.0
+_MAX_CODE_ATTEMPTS = 5    # wrong guesses before a login code is cancelled
 
 
 def _check_rate_limit(key: str):
@@ -183,6 +189,8 @@ def request_code(body: RequestCodeBody, request: Request, db: Session = Depends(
     if not email or "@" not in email:
         raise HTTPException(400, "Invalid email address")
 
+    _check_rate_limit(f"code-email:{email}")
+
     if not _is_email_allowed(email, db):
         # Don't reveal whether email is allowed — always say "code sent"
         # but log the rejection
@@ -215,14 +223,22 @@ def verify_code(body: VerifyCodeBody, request: Request, db: Session = Depends(ge
     email = body.email.strip().lower()
     code = body.code.strip()
 
+    # Only one active code exists per email (older ones are marked used)
     auth_code = db.query(AuthCode).filter(
         AuthCode.email == email,
-        AuthCode.code == code,
         AuthCode.used == False,  # noqa: E712
         AuthCode.expires_at > datetime.utcnow(),
-    ).first()
+    ).order_by(AuthCode.created_at.desc()).first()
 
     if not auth_code:
+        raise HTTPException(401, "Invalid or expired code")
+
+    if not secrets.compare_digest(auth_code.code, code):
+        # Burn the code after too many wrong guesses to stop brute force
+        auth_code.failed_attempts = (auth_code.failed_attempts or 0) + 1
+        if auth_code.failed_attempts >= _MAX_CODE_ATTEMPTS:
+            auth_code.used = True
+        db.commit()
         raise HTTPException(401, "Invalid or expired code")
 
     auth_code.used = True
@@ -373,7 +389,7 @@ def public_scout_roster(db: Session = Depends(get_db)):
         ScoutRoster.password_hash.isnot(None),
     ).order_by(ScoutRoster.name).all()
     return [
-        {"id": str(s.id), "name": s.name, "scout_id": s.scout_id or ""}
+        {"id": str(s.id), "name": _short_name(s.name)}
         for s in scouts
     ]
 

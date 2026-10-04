@@ -10,12 +10,12 @@ from sqlalchemy import func, or_
 from typing import Optional
 
 from app.database import get_db
-from app.models import FundraiserEvent, EventHouse, MasterHouse, Visit
+from app.models import FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster
 from app.schemas import (
     EventCreate, EventOut, EventAssignRequest,
     EventHouseOut, VisitCreate, VisitOut,
 )
-from app.routes.auth import require_admin
+from app.routes.auth import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -48,7 +48,7 @@ def create_event(body: EventCreate, _admin: str = Depends(require_admin), db: Se
 
 
 @router.get("/", response_model=list[EventOut])
-def list_events(db: Session = Depends(get_db)):
+def list_events(_admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     # Single query: get all events with house counts via subquery
     count_sub = (
         db.query(EventHouse.event_id, func.count(EventHouse.id).label("cnt"))
@@ -72,7 +72,7 @@ def list_events(db: Session = Depends(get_db)):
 
 
 @router.get("/{event_id}", response_model=EventOut)
-def get_event(event_id: str, db: Session = Depends(get_db)):
+def get_event(event_id: str, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     event = db.query(FundraiserEvent).filter(FundraiserEvent.id == event_id).first()
     if not event:
         raise HTTPException(404, "Event not found")
@@ -420,6 +420,7 @@ def remove_event_houses(
 def list_event_houses(
     event_id: str,
     status: str = Query(None),
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     q = (
@@ -439,8 +440,16 @@ def record_visit(
     event_id: str,
     event_house_id: str,
     body: VisitCreate,
+    user: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    scout_name, scout_id = body.scout_name, body.scout_id
+    if user.startswith("scout:"):
+        # Scout sessions: record the logged-in scout's real name, not what the browser sent
+        scout = db.query(ScoutRoster).filter(ScoutRoster.id == user.split(":", 1)[1]).first()
+        if scout:
+            scout_name, scout_id = scout.name, scout.scout_id
+
     eh = db.query(EventHouse).filter(
         EventHouse.id == event_house_id,
         EventHouse.event_id == event_id,
@@ -456,8 +465,8 @@ def record_visit(
         notes=body.notes,
         follow_up=body.follow_up,
         volunteer_name=body.volunteer_name,
-        scout_name=body.scout_name,
-        scout_id=body.scout_id,
+        scout_name=scout_name,
+        scout_id=scout_id,
         door_answer=body.door_answer,
         donation_given=body.donation_given,
         former_scout=body.former_scout,
@@ -472,7 +481,7 @@ def record_visit(
 
 
 @router.get("/{event_id}/houses/{event_house_id}/visits", response_model=list[VisitOut])
-def list_visits(event_id: str, event_house_id: str, db: Session = Depends(get_db)):
+def list_visits(event_id: str, event_house_id: str, _admin: str = Depends(require_admin), db: Session = Depends(get_db)):
     return (
         db.query(Visit)
         .filter(Visit.event_house_id == event_house_id)

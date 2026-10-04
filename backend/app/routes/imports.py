@@ -20,7 +20,8 @@ from app.importers import get_importer
 import app.importers.dallas_gis  # noqa: F401
 import app.importers.dcad  # noqa: F401
 
-router = APIRouter(prefix="/api/imports", tags=["imports"])
+# Admin-only: scouts never need these endpoints
+router = APIRouter(prefix="/api/imports", tags=["imports"], dependencies=[Depends(require_admin)])
 
 UPLOAD_DIR = Path("/tmp/scoutmap_uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)

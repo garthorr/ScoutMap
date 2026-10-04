@@ -141,7 +141,7 @@ class EventHouse(Base):
 
     event = relationship("FundraiserEvent", back_populates="event_houses")
     house = relationship("MasterHouse", back_populates="event_houses")
-    visits = relationship("Visit", back_populates="event_house")
+    visits = relationship("Visit", back_populates="event_house", order_by="Visit.visited_at")
 
     __table_args__ = (
         UniqueConstraint("event_id", "house_id", name="uq_event_house"),
@@ -257,6 +257,7 @@ class AuthCode(Base):
     code = Column(String(6), nullable=False)
     expires_at = Column(DateTime, nullable=False)
     used = Column(Boolean, default=False)
+    failed_attempts = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (

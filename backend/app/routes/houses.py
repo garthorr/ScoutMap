@@ -14,7 +14,8 @@ from app.schemas import MasterHouseOut, MasterHouseCreate
 from app.address import normalize_address, parse_address_parts
 from app.routes.auth import require_admin
 
-router = APIRouter(prefix="/api/houses", tags=["houses"])
+# Admin-only: scouts never need these endpoints
+router = APIRouter(prefix="/api/houses", tags=["houses"], dependencies=[Depends(require_admin)])
 
 # Only show residential single-family and duplex properties
 RESIDENTIAL_TYPES = ("SINGLE FAMILY RESIDENCES", "DUPLEX")

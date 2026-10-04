@@ -6,8 +6,10 @@ from sqlalchemy import text
 
 from app.database import get_db
 from app.schemas import DashboardStats
+from app.routes.auth import require_admin
 
-router = APIRouter(prefix="/api/stats", tags=["stats"])
+# Admin-only: scouts never need these endpoints
+router = APIRouter(prefix="/api/stats", tags=["stats"], dependencies=[Depends(require_admin)])
 
 
 # Single SQL query that computes all dashboard counters in one DB round-trip.

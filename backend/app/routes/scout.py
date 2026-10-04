@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, contains_eager, joinedload
 from sqlalchemy import func, case
 from typing import Optional
 
@@ -15,7 +15,7 @@ from app.database import get_db
 from app.models import (
     FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster,
 )
-from app.routes.auth import _hash_password, require_admin
+from app.routes.auth import _hash_password, _short_name, get_current_user, require_admin
 
 router = APIRouter(prefix="/api/scout", tags=["scout"])
 
@@ -40,12 +40,19 @@ class RosterOut(BaseModel):
 
 
 @router.get("/roster", response_model=list[RosterOut])
-def list_roster(active_only: bool = False, db: Session = Depends(get_db)):
+def list_roster(
+    active_only: bool = False,
+    user: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Scouts only see "First L." — full names are for admins
+    is_scout = user.startswith("scout:")
     q = db.query(ScoutRoster)
     if active_only:
         q = q.filter(ScoutRoster.active == True)  # noqa: E712
     return [
-        RosterOut(id=str(s.id), name=s.name, scout_id=s.scout_id, active=s.active,
+        RosterOut(id=str(s.id), name=_short_name(s.name) if is_scout else s.name,
+                  scout_id=None if is_scout else s.scout_id, active=s.active,
                   has_password=bool(s.password_hash))
         for s in q.order_by(ScoutRoster.name).all()
     ]
@@ -176,7 +183,7 @@ def list_group_houses(
     houses = (
         db.query(EventHouse)
         .join(MasterHouse, EventHouse.house_id == MasterHouse.id)
-        .options(joinedload(EventHouse.house), joinedload(EventHouse.visits))
+        .options(contains_eager(EventHouse.house), joinedload(EventHouse.visits))
         .filter(
             EventHouse.event_id == event_id,
             EventHouse.assigned_to == group,
@@ -213,24 +220,31 @@ def list_group_houses(
 @router.get("/data")
 def scout_data(
     event_id: Optional[str] = None,
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Return all visit data entered by scouts, with house/event info."""
+    """Return one page of visit data entered by scouts, newest first.
+
+    The summary endpoint's total_visits is the full count for paging.
+    """
     q = (
         db.query(Visit)
         .join(EventHouse, Visit.event_house_id == EventHouse.id)
         .join(MasterHouse, EventHouse.house_id == MasterHouse.id)
         .join(FundraiserEvent, EventHouse.event_id == FundraiserEvent.id)
+        # Reuse the joins above instead of joining the same tables again
         .options(
-            joinedload(Visit.event_house).joinedload(EventHouse.house),
-            joinedload(Visit.event_house).joinedload(EventHouse.event),
+            contains_eager(Visit.event_house).contains_eager(EventHouse.house),
+            contains_eager(Visit.event_house).contains_eager(EventHouse.event),
         )
         .filter(Visit.scout_name.isnot(None))
     )
     if event_id:
         q = q.filter(EventHouse.event_id == event_id)
 
-    visits = q.order_by(Visit.visited_at.desc()).all()
+    visits = q.order_by(Visit.visited_at.desc(), Visit.id).offset(offset).limit(limit).all()
     result = []
     for v in visits:
         result.append({
@@ -258,6 +272,7 @@ def scout_data(
 @router.get("/data/summary")
 def scout_data_summary(
     event_id: Optional[str] = None,
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Aggregate stats for scout data using SQL GROUP BY."""
