@@ -532,7 +532,8 @@ async function saveVisit() {
   for (const f of formFields) {
     if (f.required) {
       const val = formState[f.field_key];
-      if (val == null || val === "" || val === false) {
+      // "No" is a real answer to a Yes/No question; only an unticked checkbox counts as missing
+      if (val == null || val === "" || (f.field_type === "checkbox" && val === false)) {
         alert(`"${f.label}" is required.`);
         return;
       }
@@ -546,9 +547,12 @@ async function saveVisit() {
 
   // Map known legacy columns from formState
   const legacyKeys = ["door_answer", "donation_given", "donation_amount", "former_scout", "avoid_house", "notes"];
+  const picked = document.getElementById("scout-select").value;
   const body = {
     scout_name: scoutName,
     scout_id: scoutIdNum || null,
+    // Admins recording for a roster scout: lets the server use the roster's details
+    roster_id: !isScoutSession && picked && picked !== "__other__" ? picked : null,
     custom_data: {},
   };
 

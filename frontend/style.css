@@ -814,3 +814,133 @@ details[open] summary {
   details summary { min-height: 44px; display: flex; align-items: center; }
   .modal-content .close { min-width: 48px; min-height: 48px; }
 }
+
+/* === Phone menu (☰) === */
+#nav-toggle { display: none; }
+.nav-unsent {
+  display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px;
+  border-radius: 9px; background: #f59e0b; color: #000; font-size: 11px; line-height: 18px; text-align: center;
+}
+.nav-unsent.has-errors { background: var(--sa-red); color: var(--sa-white); }
+.nav-unsent.hidden { display: none; }
+
+@media (max-width: 768px) {
+  .nav-inner { position: relative; justify-content: space-between; }
+  #nav-toggle {
+    display: inline-flex; align-items: center; gap: 6px; background: transparent;
+    border: 1px solid rgba(255,255,255,.35); color: var(--sa-white); min-height: 38px; padding: 6px 12px;
+  }
+  #navbar .nav-links {
+    display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 600;
+    flex-direction: column; gap: 2px; padding: 8px; overflow: visible;
+    background: var(--sa-dark-blue); border-bottom: 3px solid var(--sa-red); box-shadow: var(--shadow-lg);
+  }
+  #navbar.nav-open .nav-links { display: flex; }
+  #navbar .nav-links a { width: 100%; min-height: 46px; font-size: 15px; }
+}
+
+/* === Enter Visits (built for a phone held in one hand) === */
+.entry-pickers { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.entry-setup label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: var(--sa-gray); }
+.entry-setup select { min-height: 44px; font-size: 16px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--sa-white); }
+.entry-add { margin-top: 10px; }
+
+/* Scout buttons + actions stay on screen while scrolling the houses */
+.entry-bar {
+  position: sticky; top: 67px; z-index: 400; background: var(--sa-white);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; margin: 12px 0;
+  box-shadow: var(--shadow-md);
+}
+.entry-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.entry-hint { font-size: 14px; color: var(--sa-gray); padding: 8px 4px; }
+.entry-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 4px 6px 6px; min-height: 44px;
+  border: 2px solid var(--border); border-radius: 22px; font-size: 15px; font-weight: 600;
+  cursor: pointer; user-select: none; background: var(--sa-white);
+}
+.entry-chip.active { border-color: var(--sa-blue); background: var(--sa-blue); color: var(--sa-white); }
+.entry-chip-num {
+  display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+  border-radius: 50%; background: var(--bg-subtle); color: var(--sa-dark-blue); font-size: 13px;
+}
+.entry-chip.active .entry-chip-num { background: var(--sa-white); }
+button.entry-chip-x {
+  background: transparent; color: inherit; opacity: .55; padding: 0 8px; min-height: 32px; font-size: 18px; box-shadow: none;
+}
+.entry-bar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.entry-unsent { background: #fef3c7; color: #92400e; border-radius: 12px; padding: 4px 10px; font-size: 13px; font-weight: 700; }
+.entry-unsent.has-errors { background: #fee2e2; color: #991b1b; }
+.entry-offline { background: var(--sa-gray); color: var(--sa-white); border-radius: 12px; padding: 4px 10px; font-size: 13px; font-weight: 700; }
+.entry-view-toggle { display: inline-flex; }
+.entry-view-toggle button { border-radius: 0; background: var(--sa-pale-gray); }
+.entry-view-toggle button:first-child { border-radius: 6px 0 0 6px; }
+.entry-view-toggle button:last-child { border-radius: 0 6px 6px 0; }
+.entry-view-toggle button.active { background: var(--sa-dark-blue); }
+.entry-msg { padding: 10px 12px; border-radius: var(--radius); margin-bottom: 10px; font-size: 14px; }
+.entry-msg.ok { background: #dcfce7; color: #166534; }
+.entry-msg.error { background: #fee2e2; color: #991b1b; }
+.entry-progress { font-size: 13px; color: var(--sa-gray); margin: 4px 2px 8px; }
+
+.entry-house { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; background: var(--sa-white); overflow: hidden; scroll-margin-top: 190px; }
+.entry-house.open { border-color: var(--sa-blue); box-shadow: var(--shadow-md); }
+button.entry-house-head {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 12px;
+  background: transparent; color: inherit; text-align: left; border-radius: 0; font-weight: 400; box-shadow: none;
+}
+button.entry-house-head:hover { background: var(--bg-subtle); }
+.entry-num {
+  flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--bg-subtle); color: var(--sa-dark-blue); font-weight: 700; font-size: 13px;
+}
+.entry-house.visited .entry-num { background: #059669; color: var(--sa-white); }
+.entry-house-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.entry-addr { font-size: 16px; font-weight: 600; }
+.entry-sub { font-size: 13px; color: var(--sa-gray); }
+.entry-state { font-size: 20px; flex-shrink: 0; }
+.entry-state.done { color: #059669; }
+.entry-state.pending { color: #b45309; }
+.entry-state.error { color: var(--sa-red); font-weight: 800; }
+.entry-err { color: #991b1b; }
+
+.entry-form { padding: 4px 14px 14px; border-top: 1px solid var(--border); }
+.entry-who { font-size: 15px; margin: 10px 0; }
+.entry-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.entry-label { font-size: 14px; font-weight: 600; }
+.entry-req { color: var(--sa-red); }
+.entry-field input[type=number], .entry-field input[type=text], .entry-field select, .entry-field textarea {
+  min-height: 46px; font-size: 16px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; width: 100%;
+}
+.entry-field textarea { min-height: 70px; }
+.entry-check { flex-direction: row; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; min-height: 44px; }
+.entry-check input { width: 24px; height: 24px; }
+.entry-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.entry-toggle button { min-height: 50px; font-size: 17px; background: var(--bg-subtle); color: var(--sa-dark-gray); border: 2px solid var(--border); }
+.entry-toggle button.yes { background: #059669; border-color: #059669; color: var(--sa-white); }
+.entry-toggle button.no { background: var(--sa-gray); border-color: var(--sa-gray); color: var(--sa-white); }
+.entry-form-actions { display: flex; gap: 8px; margin-top: 4px; }
+button.entry-save { flex: 1; min-height: 52px; font-size: 17px; }
+.entry-links { margin-top: 10px; font-size: 13px; }
+
+/* Sheet view: a table on a computer, stacked cards on a phone */
+.entry-sheet-table select, .entry-sheet-table input[type=text], .entry-sheet-table input[type=number] {
+  min-height: 36px; font-size: 15px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; width: 100%;
+}
+.entry-sheet-table input[type=number] { max-width: 90px; }
+.entry-sheet-table input[type=checkbox] { width: 20px; height: 20px; }
+.entry-sheet-table td, .entry-sheet-table th { padding: 6px; }
+.entry-sheet-done td { color: var(--sa-gray); background: var(--bg-subtle); }
+.entry-row-error td { background: #fee2e2 !important; }
+.entry-sheet-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px; }
+.entry-sheet-actions .help-text { margin: 0; }
+
+@media (max-width: 768px) {
+  .entry-bar { top: 51px; margin: 10px -6px; }
+  .entry-pickers { grid-template-columns: 1fr; }
+  .entry-house { scroll-margin-top: 170px; }
+  .entry-sheet-table thead { display: none; }
+  .entry-sheet-table, .entry-sheet-table tbody, .entry-sheet-table tr, .entry-sheet-table td { display: block; width: 100%; }
+  .entry-sheet-table tr { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 10px; padding: 6px 8px; }
+  .entry-sheet-table td { border: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
+  .entry-sheet-table td::before { content: attr(data-label); font-size: 12px; font-weight: 700; color: var(--sa-gray); flex-shrink: 0; }
+  .entry-sheet-table td select, .entry-sheet-table td input[type=text] { max-width: 60%; min-height: 44px; }
+}

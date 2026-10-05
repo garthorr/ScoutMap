@@ -188,5 +188,10 @@ def test_checklist_counts(client, db):
 
 def test_frontend_files_are_always_revalidated(client):
     """Stops a browser from running an old app.js against a new index.html."""
-    for path in ("/", "/scout", "/static/app.js", "/static/scout.js", "/static/style.css"):
+    for path in ("/", "/scout", "/sw.js", "/static/app.js", "/static/entry.js", "/static/scout.js", "/static/style.css"):
         assert client.get(path).headers.get("cache-control") == "no-cache", path
+
+
+def test_offline_helper_is_served_from_site_root(client):
+    r = client.get("/sw.js")
+    assert r.status_code == 200 and "javascript" in r.headers["content-type"]

@@ -178,6 +178,14 @@ class Visit(Base):
     # Dynamic form fields (JSON dict keyed by field_key)
     custom_data = Column(Text)                               # JSON string
 
+    # Who recorded it: the roster scout who went to the door, and the adult's
+    # login if an adult typed it in (empty when the scout entered it themselves)
+    scout_roster_id = Column(UUID(as_uuid=True), index=True)
+    entered_by = Column(String(320))
+    # Random ID made by the browser, so a save retried after a dropped connection
+    # is only recorded once
+    client_id = Column(String(64), unique=True, index=True)
+
     event_house = relationship("EventHouse", back_populates="visits")
 
     __table_args__ = (

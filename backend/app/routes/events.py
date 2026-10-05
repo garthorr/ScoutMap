@@ -478,18 +478,19 @@ def list_event_houses(
 # --- Visits ---
 @router.post("/{event_id}/houses/{event_house_id}/visits", response_model=VisitOut)
 def record_visit(
-    event_id: str,
-    event_house_id: str,
+    event_id: uuid.UUID,
+    event_house_id: uuid.UUID,
     body: VisitCreate,
     user: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    scout_name, scout_id = body.scout_name, body.scout_id
-    if user.startswith("scout:"):
-        # Scout sessions: record the logged-in scout's real name, not what the browser sent
-        scout = db.query(ScoutRoster).filter(ScoutRoster.id == user.split(":", 1)[1]).first()
-        if scout:
-            scout_name, scout_id = scout.name, scout.scout_id
+    scout_name, scout_id, roster_id = body.scout_name, body.scout_id, None
+    is_scout = user.startswith("scout:")
+    # Scout sessions: the logged-in scout. Admins: the roster scout they picked, if any.
+    lookup = uuid.UUID(user.split(":", 1)[1]) if is_scout else body.roster_id
+    scout = db.query(ScoutRoster).filter(ScoutRoster.id == lookup).first() if lookup else None
+    if scout:
+        scout_name, scout_id, roster_id = scout.name, scout.scout_id, scout.id
 
     eh = db.query(EventHouse).filter(
         EventHouse.id == event_house_id,
@@ -513,6 +514,8 @@ def record_visit(
         former_scout=body.former_scout,
         avoid_house=body.avoid_house,
         custom_data=json.dumps(body.custom_data) if body.custom_data else None,
+        scout_roster_id=roster_id,
+        entered_by=None if is_scout else user,
     )
     eh.status = "visited"
     db.add(visit)
