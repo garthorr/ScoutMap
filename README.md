@@ -34,13 +34,20 @@ A door-to-door fundraising management application that uses **public data as the
 # Clone and start
 git clone <repo-url>
 cd ScoutMap
+cp .env.example .env   # set POSTGRES_PASSWORD (required) and the other secrets
 docker compose up --build
 
 # Admin app:  http://localhost:8000
 # Scout app:  http://localhost:8000/scout
 ```
 
-The database is created automatically on first startup.
+The database is created automatically on first startup. `/healthz` reports
+whether the app can reach its database and backs the container healthcheck.
+
+Upgrading an existing install: its database was created with the password
+`scoutmap`, so either set `POSTGRES_PASSWORD=scoutmap` in `.env` or change the
+password first (see `.env.example`). Everyone signs in again once after this
+upgrade, because sessions are now stored hashed.
 
 ## Workflow
 
@@ -311,9 +318,12 @@ docker compose up --build
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `POSTGRES_PASSWORD` | Yes (Docker) | Database password; `docker compose` won't start without it |
+| `DATABASE_URL` | Yes | PostgreSQL connection string (set for you by `docker-compose.yml`) |
 | `ADMIN_PASSWORD` | No | Master admin password for login |
-| `SMTP_HOST` | No | SMTP server for email OTP |
+| `ALLOWED_EMAILS` | No | Seed list for email sign-in (`*@domain` wildcards allowed) |
+| `MAX_UPLOAD_MB` | No | Largest import file accepted (default 50) |
+| `SMTP_HOST` | No | SMTP server for email OTP; without it codes are logged (dev only) |
 | `SMTP_PORT` | No | SMTP port (default 587) |
 | `SMTP_USER` | No | SMTP username |
 | `SMTP_PASSWORD` | No | SMTP password |

@@ -3,11 +3,13 @@
 from collections import defaultdict
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app import database
+from app.csv_export import csv_response
 from app.database import get_db
 from app.models import MasterHouse, HouseSourceLink, EventHouse, Visit, UnmatchedRecord, FundraiserEvent
 from app.schemas import MasterHouseOut, MasterHouseCreate
@@ -22,16 +24,7 @@ router = APIRouter(prefix="/api/houses", tags=["houses"], dependencies=[Depends(
 RESIDENTIAL_TYPES = ("SINGLE FAMILY RESIDENCES", "DUPLEX")
 
 
-@router.get("/", response_model=list[MasterHouseOut])
-def list_houses(
-    search: str = Query(None),
-    zip_code: str = Query(None),
-    property_type: str = Query(None),
-    limit: int = Query(100, le=500),
-    offset: int = Query(0),
-    db: Session = Depends(get_db),
-):
-    q = db.query(MasterHouse)
+def _filter_houses(q, search: Optional[str], zip_code: Optional[str], property_type: Optional[str]):
     if search:
         pattern = f"%{search.upper()}%"
         q = q.filter(MasterHouse.normalized_address.ilike(pattern))
@@ -39,7 +32,51 @@ def list_houses(
         q = q.filter(MasterHouse.zip_code == zip_code)
     if property_type:
         q = q.filter(MasterHouse.property_type == property_type)
-    return q.order_by(MasterHouse.normalized_address).offset(offset).limit(limit).all()
+    return q
+
+
+@router.get("/", response_model=list[MasterHouseOut])
+def list_houses(
+    response: Response,
+    search: str = Query(None),
+    zip_code: str = Query(None),
+    property_type: str = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    q = _filter_houses(db.query(MasterHouse), search, zip_code, property_type)
+    response.headers["X-Total-Count"] = str(q.count())
+    return q.order_by(MasterHouse.normalized_address, MasterHouse.id).offset(offset).limit(limit).all()
+
+
+def _house_csv_rows(search: Optional[str], zip_code: Optional[str], property_type: Optional[str]):
+    db = database.SessionLocal()
+    try:
+        q = db.query(
+            MasterHouse.full_address, MasterHouse.city, MasterHouse.zip_code,
+            MasterHouse.owner_name, MasterHouse.total_appraised_value,
+            MasterHouse.latitude, MasterHouse.longitude, MasterHouse.manually_created,
+        )
+        q = _filter_houses(q, search, zip_code, property_type)
+        for r in q.order_by(MasterHouse.normalized_address, MasterHouse.id).yield_per(1000):
+            yield [
+                r.full_address, r.city, r.zip_code, r.owner_name, r.total_appraised_value,
+                r.latitude, r.longitude, "Manual" if r.manually_created else "Imported",
+            ]
+    finally:
+        db.close()
+
+
+# Must stay above /{house_id}, which would otherwise match "export.csv"
+@router.get("/export.csv")
+def export_houses_csv(
+    search: str = Query(None),
+    zip_code: str = Query(None),
+    property_type: str = Query(None),
+):
+    header = ["Address", "City", "ZIP", "Owner", "Appraised Value", "Latitude", "Longitude", "Source"]
+    return csv_response("houses.csv", header, _house_csv_rows(search, zip_code, property_type))
 
 
 @router.get("/map")

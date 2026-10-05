@@ -1,15 +1,14 @@
 """Import endpoints – upload public data files and trigger import pipelines."""
 
 import uuid
-import shutil
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks, Query, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app.config import settings
 from app.database import get_db
 from app.models import SourceImport, UnmatchedRecord, HouseSourceLink, MasterHouse, EventHouse, FundraiserEvent
 from app.schemas import SourceImportOut, UnmatchedRecordOut
@@ -126,6 +125,24 @@ async def create_import(
         if not event:
             raise HTTPException(400, f"Event not found: {event_id}")
 
+    # Save the upload first, enforcing the size cap while it streams to disk
+    safe_name = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
+    if not safe_name:
+        safe_name = "upload"
+    dest = UPLOAD_DIR / f"{uuid.uuid4()}_{safe_name}"
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    written = 0
+    try:
+        with open(dest, "wb") as f_out:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(413, f"File is larger than the {settings.max_upload_mb} MB upload limit")
+                f_out.write(chunk)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+
     batch_id = str(uuid.uuid4())
     si = SourceImport(
         source_name=source_name,
@@ -137,14 +154,6 @@ async def create_import(
     db.add(si)
     db.commit()
     db.refresh(si)
-
-    # Save uploaded file
-    safe_name = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
-    if not safe_name:
-        safe_name = "upload"
-    dest = UPLOAD_DIR / f"{si.id}_{safe_name}"
-    with open(dest, "wb") as f_out:
-        shutil.copyfileobj(file.file, f_out)
 
     background_tasks.add_task(run_import_task, str(si.id), source_name, str(dest), event_id)
 
@@ -236,8 +245,15 @@ def delete_import(import_id: str, _admin: str = Depends(require_admin), db: Sess
 
 
 @router.get("/unmatched/", response_model=list[UnmatchedRecordOut])
-def list_unmatched(status: str = "pending", db: Session = Depends(get_db)):
+def list_unmatched(
+    response: Response,
+    status: str = "pending",
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
     q = db.query(UnmatchedRecord)
     if status:
         q = q.filter(UnmatchedRecord.status == status)
-    return q.order_by(UnmatchedRecord.created_at.desc()).limit(200).all()
+    response.headers["X-Total-Count"] = str(q.count())
+    return q.order_by(UnmatchedRecord.created_at.desc(), UnmatchedRecord.id).offset(offset).limit(limit).all()

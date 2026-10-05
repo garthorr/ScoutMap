@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ScoutMap</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="/static/style.css?v=4" />
+  <link rel="stylesheet" href="/static/style.css?v=5" />
 </head>
 <body>
   <!-- Login Overlay -->
@@ -292,7 +292,7 @@
             <input id="house-zip" placeholder="ZIP code" />
             <span class="tooltip">Filter results to a specific ZIP code</span>
           </span>
-          <button onclick="loadHouses()" title="Search the master house list">Search</button>
+          <button onclick="loadHouses(0)" title="Search the master house list">Search</button>
           <button class="btn-sm" onclick="clearHouseFilters()" style="background:var(--sa-gray);">Clear</button>
         </div>
       </div>
@@ -410,7 +410,8 @@ Alex Johnson,</pre>
           </select>
           <button onclick="loadScoutData()">Filter</button>
           <button class="btn-sm" onclick="clearScoutDataFilters()" style="background:var(--sa-gray);">Clear</button>
-          <button class="btn-sm" onclick="exportScoutDataCSV()">Export CSV</button>
+          <button class="btn-sm" onclick="exportScoutDataCSV()">Export Visits CSV</button>
+          <button class="btn-sm" onclick="exportScoutSummaryCSV()">Export Summary CSV</button>
         </div>
       </div>
       <div class="card">
@@ -477,7 +478,7 @@ Alex Johnson,</pre>
 
   <div id="operation-status"><span class="loading-spinner"></span><span id="operation-status-text"></span></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="/static/app.js?v=5"></script>
-  <script src="/static/entry.js?v=3"></script>
+  <script src="/static/app.js?v=8"></script>
+  <script src="/static/entry.js?v=4"></script>
 </body>
 </html>

@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     session_expiry_hours: int = 72
     auth_code_expiry_minutes: int = 10
 
+    # Uploads (import files, roster CSVs)
+    max_upload_mb: int = 50
+
     # SMTP (optional — codes logged to console when not configured)
     smtp_host: str = ""
     smtp_port: int = 587

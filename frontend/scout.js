@@ -15,18 +15,27 @@ let eventsData = [];
 let formFields = []; // dynamic field config from server
 
 // --- Auth ---
-let _authToken = localStorage.getItem("scoutmap_token") || "";
+// The session lives in an HttpOnly cookie that page scripts can't read, so an
+// injected script can't steal it. The stored flag only remembers *that* this
+// device is signed in, so pages still open with no signal.
+let _signedIn = (() => { try { return localStorage.getItem("scoutmap_signed_in") === "1"; } catch { return false; } })();
+function _setSignedIn(on) {
+  _signedIn = on;
+  try {
+    if (on) localStorage.setItem("scoutmap_signed_in", "1");
+    else localStorage.removeItem("scoutmap_signed_in");
+  } catch { /* ok */ }
+}
+try { localStorage.removeItem("scoutmap_token"); } catch { /* ok */ }  // tokens were kept here before
 let isScoutSession = false;  // true when a scout signed in with their code (vs. an admin)
 const SCOUT_CODE_LENGTH = 8;
 
 function authFetch(url, opts = {}) {
-  opts.headers = opts.headers || {};
-  if (_authToken) opts.headers["Authorization"] = "Bearer " + _authToken;
-  return fetch(url, opts);
+  return fetch(url, { credentials: "same-origin", ...opts });
 }
 
 async function _checkAuth() {
-  if (!_authToken) { _showLoginOverlay(); return; }
+  if (!_signedIn) { _showLoginOverlay(); return; }
   try {
     const r = await authFetch(API + "/api/auth/me");
     if (r.ok) {
@@ -35,7 +44,7 @@ async function _checkAuth() {
       if (isScoutSession) scoutName = me.name;
       _afterLogin();
     } else {
-      _authToken = ""; localStorage.removeItem("scoutmap_token"); _showLoginOverlay();
+      _setSignedIn(false); _showLoginOverlay();
     }
   } catch { _showLoginOverlay(); }
 }
@@ -91,8 +100,7 @@ async function scoutCodeLogin() {
     });
     const data = await r.json();
     if (r.ok && data.token) {
-      _authToken = data.token;
-      localStorage.setItem("scoutmap_token", _authToken);
+      _setSignedIn(true);
       isScoutSession = true;
       scoutName = data.scout_name;
       scoutIdNum = data.scout_id || "";
@@ -126,8 +134,7 @@ async function scoutAdminLogin() {
     });
     const data = await r.json();
     if (r.ok && data.token) {
-      _authToken = data.token;
-      localStorage.setItem("scoutmap_token", _authToken);
+      _setSignedIn(true);
       isScoutSession = false;
       _afterLogin();
     } else {
@@ -199,8 +206,7 @@ function saveScoutInfo() {
 // --- Logout ---
 function scoutLogout() {
   try { authFetch(API + "/api/auth/logout", { method: "POST" }); } catch { /* ok */ }
-  _authToken = "";
-  localStorage.removeItem("scoutmap_token");
+  _setSignedIn(false);
   localStorage.removeItem("scoutmap_scout");
   isScoutSession = false;
   scoutName = "";

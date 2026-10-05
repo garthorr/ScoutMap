@@ -5,15 +5,18 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
+from urllib.parse import urlsplit
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
+from sqlalchemy import text
 
 
 from app.config import settings
 from app.routes import imports, houses, events, stats, arcgis, scout
-from app.routes.auth import router as auth_router
+from app.routes.auth import router as auth_router, hash_token, request_token
 from app.routes.form_fields import router as form_fields_router
 from app.routes.visit_entry import router as visit_entry_router
 from app.models import AuthSession
@@ -43,9 +46,10 @@ logger.setLevel(logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
-# In-memory session token cache (avoids a DB query on every API request)
+# In-memory session token cache (avoids a DB query on every API request).
+# Keyed by the token's SHA-256, like the auth_sessions table.
 # ---------------------------------------------------------------------------
-_SESSION_CACHE: dict[str, tuple[float, str]] = {}  # token → (expiry timestamp, email)
+_SESSION_CACHE: dict[str, tuple[float, str]] = {}  # token hash → (expiry timestamp, email)
 _SESSION_CACHE_TTL = 120  # seconds before re-checking DB
 
 
@@ -75,8 +79,14 @@ def _cache_session(token: str, db_expires_at: datetime, email: str):
 
 
 def invalidate_session_cache(token: str):
-    """Call on logout to immediately remove a token from cache."""
+    """Call on logout to immediately remove a token (hash) from cache."""
     _SESSION_CACHE.pop(token, None)
+
+
+def invalidate_sessions_for_email(email: str):
+    """Drop every cached session for one user (e.g. a scout's code was replaced)."""
+    for key in [k for k, (_exp, e) in _SESSION_CACHE.items() if e == email]:
+        _SESSION_CACHE.pop(key, None)
 
 # How often to purge expired sessions / login codes while running
 _CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
@@ -98,6 +108,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_title, lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Public paths that don't require authentication
 _PUBLIC_PATHS = {
@@ -106,6 +117,31 @@ _PUBLIC_PATHS = {
     "/api/auth/logout",
 }
 _PUBLIC_PREFIXES = ("/static/", "/api/auth/")
+
+
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+    # 'unsafe-inline' is needed for the pages' inline onclick handlers; scripts
+    # from elsewhere are still limited to unpkg (Leaflet).
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "img-src 'self' data: blob: https://unpkg.com https://*.tile.openstreetmap.org; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    ),
+}
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
 
 
 @app.middleware("http")
@@ -128,23 +164,25 @@ async def auth_middleware(request: Request, call_next):
     """Require valid session token for all API routes (except auth endpoints)."""
     path = request.url.path
 
+    # Cookies ride along on cross-site requests, so a state-changing request
+    # from another site's page must not be able to act as the signed-in user.
+    if request.method not in ("GET", "HEAD", "OPTIONS") and path.startswith("/api/"):
+        origin = request.headers.get("Origin")
+        if origin and origin != "null" and urlsplit(origin).netloc != request.headers.get("host", ""):
+            return JSONResponse({"detail": "Cross-site request blocked"}, status_code=403)
+
     # Skip auth for static files, auth endpoints, and page routes
-    if path in ("/", "/scout", "/sw.js", "/favicon.ico"):
+    if path in ("/", "/scout", "/sw.js", "/favicon.ico", "/healthz"):
         return await call_next(request)
     if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
         return await call_next(request)
 
     # All /api/* routes require auth
     if path.startswith("/api/"):
-        token = None
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-        if not token:
-            token = request.cookies.get("scoutmap_token")
-
-        if not token:
+        raw_token = request_token(request)
+        if not raw_token:
             return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+        token = hash_token(raw_token)
 
         # Fast-path: check in-memory cache first
         cached_email = _session_valid_cached(token)
@@ -168,6 +206,20 @@ async def auth_middleware(request: Request, call_next):
                 db.close()
 
     return await call_next(request)
+
+
+@app.get("/healthz")
+def healthz():
+    """Health probe for Docker/Traefik: is the app up and can it reach the database?"""
+    from app import database
+    db = database.SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        return JSONResponse({"status": "unhealthy", "database": "unreachable"}, status_code=503)
+    finally:
+        db.close()
+    return {"status": "ok"}
 
 
 # Register API routers

@@ -535,7 +535,7 @@ let _flushing = false;
 async function flushVisitQueue() {
   _updateOnlineState();
   const waiting = _readQueue().filter(q => !q.error);
-  if (_flushing || !waiting.length || !_authToken || navigator.onLine === false) return;
+  if (_flushing || !waiting.length || !_signedIn || navigator.onLine === false) return;
   _flushing = true;
   let sentAny = false;
   try {
