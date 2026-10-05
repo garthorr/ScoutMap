@@ -1,8 +1,6 @@
 """Import endpoints – upload public data files and trigger import pipelines."""
 
 import uuid
-import shutil
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +8,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, B
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app.config import settings
 from app.database import get_db
 from app.models import SourceImport, UnmatchedRecord, HouseSourceLink, MasterHouse, EventHouse, FundraiserEvent
 from app.schemas import SourceImportOut, UnmatchedRecordOut
@@ -126,6 +125,24 @@ async def create_import(
         if not event:
             raise HTTPException(400, f"Event not found: {event_id}")
 
+    # Save the upload first, enforcing the size cap while it streams to disk
+    safe_name = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
+    if not safe_name:
+        safe_name = "upload"
+    dest = UPLOAD_DIR / f"{uuid.uuid4()}_{safe_name}"
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    written = 0
+    try:
+        with open(dest, "wb") as f_out:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(413, f"File is larger than the {settings.max_upload_mb} MB upload limit")
+                f_out.write(chunk)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+
     batch_id = str(uuid.uuid4())
     si = SourceImport(
         source_name=source_name,
@@ -137,14 +154,6 @@ async def create_import(
     db.add(si)
     db.commit()
     db.refresh(si)
-
-    # Save uploaded file
-    safe_name = "".join(c for c in (file.filename or "upload") if c.isalnum() or c in "._-")
-    if not safe_name:
-        safe_name = "upload"
-    dest = UPLOAD_DIR / f"{si.id}_{safe_name}"
-    with open(dest, "wb") as f_out:
-        shutil.copyfileobj(file.file, f_out)
 
     background_tasks.add_task(run_import_task, str(si.id), source_name, str(dest), event_id)
 

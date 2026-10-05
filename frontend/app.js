@@ -9,19 +9,26 @@ function esc(s) {
 }
 
 // --- Auth ---
-let _authToken = localStorage.getItem("scoutmap_token") || "";
+// The session lives in an HttpOnly cookie that page scripts can't read, so an
+// injected script can't steal it. The stored flag only remembers *that* this
+// device is signed in, so pages still open with no signal.
+let _signedIn = (() => { try { return localStorage.getItem("scoutmap_signed_in") === "1"; } catch { return false; } })();
+function _setSignedIn(on) {
+  _signedIn = on;
+  try {
+    if (on) localStorage.setItem("scoutmap_signed_in", "1");
+    else localStorage.removeItem("scoutmap_signed_in");
+  } catch { /* ok */ }
+}
+try { localStorage.removeItem("scoutmap_token"); } catch { /* ok */ }  // tokens were kept here before
 
 function _authHeaders() {
-  const h = { "Content-Type": "application/json" };
-  if (_authToken) h["Authorization"] = "Bearer " + _authToken;
-  return h;
+  return { "Content-Type": "application/json" };
 }
 
-/** Authenticated fetch wrapper — injects Bearer token. */
+/** Fetch for API calls; the session cookie goes along automatically. */
 function authFetch(url, opts = {}) {
-  opts.headers = opts.headers || {};
-  if (_authToken) opts.headers["Authorization"] = "Bearer " + _authToken;
-  return fetch(url, opts);
+  return fetch(url, { credentials: "same-origin", ...opts });
 }
 
 // --- Loading indicators ---
@@ -54,21 +61,20 @@ function _flashStatus(msg, duration) {
 }
 
 async function _checkAuth() {
-  if (!_authToken) { _showLogin(); return; }
   try {
     const r = await authFetch(API + "/api/auth/me");
     if (r.ok) {
       const data = await r.json();
+      _setSignedIn(true);
       _hideLogin();
       document.getElementById("settings-user-email").textContent = data.email;
     } else {
-      _authToken = "";
-      localStorage.removeItem("scoutmap_token");
+      _setSignedIn(false);
       _showLogin();
     }
   } catch {
     // Server unreachable (no signal): stay signed in so saved pages and visits still work
-    _hideLogin();
+    if (_signedIn) _hideLogin(); else _showLogin();
   }
 }
 
@@ -96,8 +102,7 @@ async function loginAdminPassword() {
     });
     const data = await r.json();
     if (r.ok && data.token) {
-      _authToken = data.token;
-      localStorage.setItem("scoutmap_token", _authToken);
+      _setSignedIn(true);
       _hideLogin();
       document.getElementById("settings-user-email").textContent = data.email;
       loadDashboard();
@@ -173,8 +178,7 @@ async function loginVerifyCode() {
     });
     const data = await r.json();
     if (r.ok && data.token) {
-      _authToken = data.token;
-      localStorage.setItem("scoutmap_token", _authToken);
+      _setSignedIn(true);
       _hideLogin();
       document.getElementById("settings-user-email").textContent = data.email;
       loadDashboard();
@@ -199,8 +203,7 @@ async function appLogout() {
   if (unsent && !confirm(`${unsent} visit(s) haven't been sent yet. They stay on this device and send after the next sign-in.\n\nLog out anyway?`)) return;
   try { if (window.caches) await caches.delete("scoutmap-v1"); } catch { /* ok */ }
   try { await authFetch(API + "/api/auth/logout", { method: "POST" }); } catch { /* ok */ }
-  _authToken = "";
-  localStorage.removeItem("scoutmap_token");
+  _setSignedIn(false);
   _showLogin();
   document.getElementById("login-step-admin").style.display = "";
   document.getElementById("login-step-email").style.display = "none";
@@ -290,7 +293,7 @@ function _saveBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
-/** Download a server-generated file (needs the Bearer token, so a plain link won't do). */
+/** Download a server-generated file and save it with the name the server gives. */
 async function downloadFromServer(url, fallbackName) {
   _showStatus("Preparing export…");
   try {
@@ -2360,7 +2363,7 @@ document.getElementById("form-field-create").onsubmit = async (e) => {
 
 // --- Init ---
 _checkAuth().then(() => {
-  if (!_authToken) return;
+  if (!_signedIn) return;
   // Reopen the last page (handy when a phone reloads the tab mid-walk)
   let last = "dashboard";
   try { last = localStorage.getItem("scoutmap_page") || "dashboard"; } catch { /* ok */ }

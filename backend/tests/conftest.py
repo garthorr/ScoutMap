@@ -48,7 +48,7 @@ def client():
 
 def _session(db, email):
     token = secrets.token_hex(32)
-    db.add(AuthSession(token=token, email=email,
+    db.add(AuthSession(token=auth.hash_token(token), email=email,
                        expires_at=datetime.utcnow() + timedelta(hours=1)))
     db.commit()
     return {"Authorization": f"Bearer {token}"}

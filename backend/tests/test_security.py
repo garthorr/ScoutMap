@@ -51,7 +51,7 @@ def test_only_admins_see_roster_and_codes(client, db):
 
 def test_code_locked_after_too_many_wrong_guesses(client, db):
     email = "parent@example.com"
-    db.add(AuthCode(email=email, code="123456",
+    db.add(AuthCode(email=email, code=auth._hash_code("123456"),
                     expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
     for _ in range(auth._MAX_CODE_ATTEMPTS):
@@ -64,7 +64,7 @@ def test_code_locked_after_too_many_wrong_guesses(client, db):
 
 def test_correct_code_still_logs_in(client, db):
     email = "parent@example.com"
-    db.add(AuthCode(email=email, code="123456",
+    db.add(AuthCode(email=email, code=auth._hash_code("123456"),
                     expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
     client.post("/api/auth/verify-code", json={"email": email, "code": "000000"})

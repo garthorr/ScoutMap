@@ -262,7 +262,7 @@ class AuthCode(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(320), nullable=False, index=True)
-    code = Column(String(6), nullable=False)
+    code = Column(String(200), nullable=False)  # PBKDF2 "salt:hash", never the plain code
     expires_at = Column(DateTime, nullable=False)
     used = Column(Boolean, default=False)
     failed_attempts = Column(Integer, nullable=False, default=0, server_default="0")
@@ -277,7 +277,7 @@ class AuthSession(Base):
     __tablename__ = "auth_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    token = Column(String(64), nullable=False, unique=True, index=True)
+    token = Column(String(64), nullable=False, unique=True, index=True)  # SHA-256 of the bearer token
     email = Column(String(320), nullable=False)
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)

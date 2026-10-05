@@ -100,8 +100,14 @@ async def import_roster_csv(file: UploadFile = File(...), _admin: str = Depends(
     Extra columns are ignored. Duplicate names (case-insensitive) are skipped.
     Each new scout gets a unique login code.
     """
-    content = await file.read()
-    text = content.decode("utf-8-sig")  # handle BOM from Excel
+    max_bytes = 5 * 1024 * 1024  # a troop roster is a few KB
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(413, "Roster CSV is larger than 5 MB")
+    try:
+        text = content.decode("utf-8-sig")  # handle BOM from Excel
+    except UnicodeDecodeError:
+        raise HTTPException(400, "Roster CSV must be saved as UTF-8 text")
     reader = csv.DictReader(io.StringIO(text))
 
     # Normalize header names: strip whitespace, lowercase
