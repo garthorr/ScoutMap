@@ -1917,11 +1917,12 @@ function _houseFilterParams() {
   return params;
 }
 
-/** page omitted = stay on the current page, unless the search/ZIP changed since the last load. */
+/** page omitted = stay on the current page. A changed search/ZIP always starts again at the first page. */
 async function loadHouses(page) {
   const filters = _houseFilterParams();
   const filterKey = filters.toString();
-  if (page == null) page = filterKey === _houseFilterKey ? _housePage : 0;
+  if (filterKey !== _houseFilterKey) page = 0;
+  else if (page == null) page = _housePage;
   page = Math.max(0, page);
   _houseFilterKey = filterKey;
   _housePage = page;
