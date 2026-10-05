@@ -17,6 +17,7 @@ from app.models import (
     AuthSession, FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster,
 )
 from app.routes.auth import new_scout_code, require_admin
+from app.routes.events import _addr_sort_key
 
 router = APIRouter(prefix="/api/scout", tags=["scout"])
 
@@ -24,6 +25,11 @@ router = APIRouter(prefix="/api/scout", tags=["scout"])
 def natural_key(label: str) -> list:
     """Sort key so "Group 2" comes before "Group 10"."""
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", label or "")]
+
+
+def walk_order_key(house: MasterHouse) -> tuple:
+    """Street, then house number as a number (so 9 comes before 10)."""
+    return ((house.street_name or "").upper(), _addr_sort_key(house.address_number), house.address_number or "")
 
 
 # ---------------------------------------------------------------------------
@@ -198,9 +204,9 @@ def list_group_houses(
             EventHouse.event_id == event_id,
             EventHouse.assigned_to == group,
         )
-        .order_by(MasterHouse.address_number)
         .all()
     )
+    houses.sort(key=lambda eh: walk_order_key(eh.house))
     result = []
     for eh in houses:
         last_visit = eh.visits[-1] if eh.visits else None
@@ -274,6 +280,7 @@ def scout_data(
             "avoid_house": v.avoid_house,
             "notes": v.notes,
             "outcome": v.outcome,
+            "entered_by": v.entered_by,
             "custom_data": json.loads(v.custom_data) if v.custom_data else None,
         })
     return result

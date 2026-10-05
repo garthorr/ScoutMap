@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ScoutMap</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="/static/style.css?v=3" />
+  <link rel="stylesheet" href="/static/style.css?v=4" />
 </head>
 <body>
   <!-- Login Overlay -->
@@ -43,6 +43,7 @@
   <nav id="navbar">
     <div class="nav-inner">
       <h1>&#9884; ScoutMap</h1>
+      <button id="nav-toggle" type="button" aria-label="Menu" aria-expanded="false" onclick="toggleNav()">&#9776; Menu</button>
       <div class="nav-links">
         <a href="#" data-page="dashboard" onclick="showPage('dashboard', event)" class="active">Dashboard</a>
         <span class="nav-divider"></span>
@@ -53,6 +54,7 @@
         <a href="#" data-page="scout-form" onclick="showPage('scout-form', event)">Scout Form</a>
         <span class="nav-divider"></span>
         <span class="nav-phase-label">Collect</span>
+        <a href="#" data-page="entry" onclick="showPage('entry', event)">Enter Visits <span id="nav-unsent" class="nav-unsent hidden"></span></a>
         <a href="#" data-page="scout-data" onclick="showPage('scout-data', event)">Scout Data</a>
         <a href="/scout" target="_blank" style="border:1px solid var(--border);">Scout App</a>
         <span class="nav-divider"></span>
@@ -188,7 +190,7 @@
         <p class="help-text">Add houses and make walk groups on the map.</p>
         <div id="event-houses-list"></div>
         <button onclick="openMapForEvent(currentEventId)">Edit on Map</button>
-        <button id="btn-print-packet" onclick="printPacket()" title="Print a walk packet for assigned houses">Print Packet</button>
+        <button onclick="printWalkSheets(currentEventId)" title="Print a tally sheet for each walk group">Print walk sheets</button>
         <button class="btn-sm" onclick="exportEventHousesCSV()" title="Export assigned houses to CSV">Export CSV</button>
       </div>
     </section>
@@ -363,6 +365,40 @@ Alex Johnson,</pre>
       <div id="roster-list" class="card-list"></div>
     </section>
 
+    <!-- Enter Visits -->
+    <section id="page-entry" class="page">
+      <h2>Enter Visits</h2>
+      <div class="card entry-setup">
+        <div class="entry-pickers">
+          <label>Event <select id="entry-event"></select></label>
+          <label>Walk group <select id="entry-group"></select></label>
+        </div>
+        <div class="entry-add">
+          <label>Scouts out today
+            <select id="entry-add-scout"><option value="">+ Add a scout…</option></select>
+          </label>
+        </div>
+        <p class="help-text" style="margin:6px 0 0;">Tap a scout below, then tap the house they went to. Using a paper walk sheet? Add scouts in the same order as the key on the sheet, then switch to <strong>Sheet</strong>.</p>
+      </div>
+
+      <div id="entry-bar" class="entry-bar">
+        <div id="entry-chips" class="entry-chips"></div>
+        <div class="entry-bar-actions">
+          <span id="entry-offline" class="entry-offline hidden">Offline</span>
+          <span id="entry-unsent" class="entry-unsent hidden"></span>
+          <button type="button" class="btn-sm btn-quiet" id="entry-undo" onclick="undoLastEntry()" disabled>Undo</button>
+          <span class="entry-view-toggle">
+            <button type="button" class="btn-sm" data-view="live" onclick="setEntryView('live')">Live</button><button type="button" class="btn-sm" data-view="sheet" onclick="setEntryView('sheet')">Sheet</button>
+          </span>
+          <button type="button" class="btn-sm" onclick="printWalkSheets(entry.eventId, entry.group)">Print sheet</button>
+        </div>
+      </div>
+
+      <div id="entry-msg" class="entry-msg hidden"></div>
+      <div id="entry-list"></div>
+      <div id="entry-sheet" class="hidden"></div>
+    </section>
+
     <!-- Scout Data -->
     <section id="page-scout-data" class="page">
       <h2>Scout Data</h2>
@@ -434,67 +470,6 @@ Alex Johnson,</pre>
       </div>
     </section>
 
-    <!-- Visit Modal -->
-    <div id="visit-modal" class="modal hidden">
-      <div class="modal-content" style="width:460px;">
-        <span class="close" onclick="closeVisitModal()">&times;</span>
-        <h3 id="visit-modal-title">Record Visit</h3>
-        <form id="visit-form">
-          <input type="hidden" name="event_house_id" />
-          <input type="hidden" name="event_id" />
-
-          <label>Door Answer
-            <select name="door_answer">
-              <option value="">—</option>
-              <option value="true">Yes — someone answered</option>
-              <option value="false">No answer</option>
-            </select>
-          </label>
-
-          <label>Donation
-            <select name="donation_given" id="visit-donation-select">
-              <option value="">—</option>
-              <option value="true">Yes</option>
-              <option value="false">No</option>
-            </select>
-          </label>
-          <label id="visit-donation-amount-wrap" style="display:none">Donation Amount <input name="donation_amount" type="number" step="0.01" min="0" /></label>
-
-          <label>Former Scout
-            <select name="former_scout">
-              <option value="">—</option>
-              <option value="true">Yes</option>
-              <option value="false">No</option>
-            </select>
-          </label>
-
-          <label><input name="avoid_house" type="checkbox" /> Avoid this house in future</label>
-
-          <label>Outcome
-            <select name="outcome">
-              <option value="">—</option>
-              <option value="donated">Donated</option>
-              <option value="pledged">Pledged</option>
-              <option value="not_home">Not Home</option>
-              <option value="refused">Refused</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label>Tickets Purchased <input name="tickets_purchased" type="number" value="0" min="0" /></label>
-          <label>Notes <textarea name="notes"></textarea></label>
-          <label><input name="follow_up" type="checkbox" /> Follow-up needed</label>
-
-          <label>Volunteer
-            <select name="volunteer_select" id="visit-volunteer-select">
-              <option value="">Select volunteer...</option>
-              <option value="__other__">Other (write in)</option>
-            </select>
-          </label>
-          <label id="visit-volunteer-other-wrap" style="display:none">Volunteer Name <input name="volunteer_name" /></label>
-          <button type="submit">Save Visit</button>
-        </form>
-      </div>
-    </div>
     <footer id="app-footer">
       <p>ScoutMap &middot; Scouting America Fundraising Tool</p>
     </footer>
@@ -502,6 +477,7 @@ Alex Johnson,</pre>
 
   <div id="operation-status"><span class="loading-spinner"></span><span id="operation-status-text"></span></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="/static/app.js?v=4"></script>
+  <script src="/static/app.js?v=5"></script>
+  <script src="/static/entry.js?v=3"></script>
 </body>
 </html>

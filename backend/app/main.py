@@ -15,6 +15,7 @@ from app.config import settings
 from app.routes import imports, houses, events, stats, arcgis, scout
 from app.routes.auth import router as auth_router
 from app.routes.form_fields import router as form_fields_router
+from app.routes.visit_entry import router as visit_entry_router
 from app.models import AuthSession
 from app.startup import cleanup_expired_sessions
 
@@ -117,7 +118,7 @@ async def no_stale_frontend(request: Request, call_next):
     """
     response = await call_next(request)
     path = request.url.path
-    if path in ("/", "/scout") or path.startswith("/static/"):
+    if path in ("/", "/scout", "/sw.js") or path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
@@ -128,7 +129,7 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Skip auth for static files, auth endpoints, and page routes
-    if path in ("/", "/scout", "/favicon.ico"):
+    if path in ("/", "/scout", "/sw.js", "/favicon.ico"):
         return await call_next(request)
     if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
         return await call_next(request)
@@ -178,6 +179,7 @@ app.include_router(stats.router)
 app.include_router(arcgis.router)
 app.include_router(scout.router)
 app.include_router(form_fields_router)
+app.include_router(visit_entry_router)
 
 # Serve frontend static files
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
@@ -192,3 +194,8 @@ if FRONTEND_DIR.exists():
     @app.get("/scout")
     async def scout_page():
         return FileResponse(str(FRONTEND_DIR / "scout.html"))
+
+    # Served from the site root so the offline helper can cover every page
+    @app.get("/sw.js")
+    async def service_worker():
+        return FileResponse(str(FRONTEND_DIR / "sw.js"), media_type="application/javascript")

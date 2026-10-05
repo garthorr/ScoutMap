@@ -126,6 +126,8 @@ class VisitCreate(BaseModel):
     avoid_house: bool = False
     # Dynamic form fields
     custom_data: Optional[dict] = None
+    # Admins using the scout app pick a roster scout
+    roster_id: Optional[UUID] = None
 
 
 class VisitOut(BaseModel):

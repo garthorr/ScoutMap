@@ -67,7 +67,8 @@ async function _checkAuth() {
       _showLogin();
     }
   } catch {
-    _showLogin();
+    // Server unreachable (no signal): stay signed in so saved pages and visits still work
+    _hideLogin();
   }
 }
 
@@ -194,6 +195,9 @@ function loginBackToEmail() {
 }
 
 async function appLogout() {
+  const unsent = typeof unsentVisitCount === "function" ? unsentVisitCount() : 0;
+  if (unsent && !confirm(`${unsent} visit(s) haven't been sent yet. They stay on this device and send after the next sign-in.\n\nLog out anyway?`)) return;
+  try { if (window.caches) await caches.delete("scoutmap-v1"); } catch { /* ok */ }
   try { await authFetch(API + "/api/auth/logout", { method: "POST" }); } catch { /* ok */ }
   _authToken = "";
   localStorage.removeItem("scoutmap_token");
@@ -282,7 +286,11 @@ function showPage(name, evt) {
   const el = document.getElementById("page-" + name);
   if (el) el.classList.add("active");
 
+  document.getElementById("navbar").classList.remove("nav-open");
+  try { localStorage.setItem("scoutmap_page", name); } catch { /* ok */ }
+
   if (name === "dashboard") loadDashboard();
+  if (name === "entry") loadEntryPage();
   if (name === "map") initMap();
   if (name === "events") loadEvents();
   if (name === "imports") { loadImports(); loadUnmatched(); }
@@ -291,6 +299,13 @@ function showPage(name, evt) {
   if (name === "scout-data") { loadScoutDataEvents(); loadScoutData(); }
   if (name === "scout-form") loadFormFields();
   if (name === "settings") loadAllowedEmails();
+}
+
+/** Phone menu: the ☰ button shows/hides the page links. */
+function toggleNav() {
+  const nav = document.getElementById("navbar");
+  const open = nav.classList.toggle("nav-open");
+  document.getElementById("nav-toggle").setAttribute("aria-expanded", open);
 }
 
 // --- Dashboard ---
@@ -388,6 +403,7 @@ function _renderChecklist(eventId, c) {
         ? `${c.houses_visited} of ${c.houses} houses visited · $${c.donations.toLocaleString()} donated`
         : `Share the scout app: ${location.origin}/scout`,
       action: c?.visits ? "Scout data" : "Copy link", go: c?.visits ? "showPage('scout-data')" : "copyScoutLink()",
+      extra: { action: "Enter visits", go: `openEntryFor('${ev}')` },
     },
   ];
   const next = steps.findIndex(st => !st.done);
@@ -398,6 +414,7 @@ function _renderChecklist(eventId, c) {
         <span class="check-title">${esc(st.title)}</span>
         <span class="check-detail">${esc(st.detail)}</span>
       </span>
+      ${st.extra ? `<button class="btn-sm btn-quiet" onclick="${st.extra.go}">${esc(st.extra.action)}</button>` : ""}
       <button class="${i === next ? "" : "btn-sm btn-quiet"}" onclick="${st.go}">${i === next ? "Next: " : ""}${esc(st.action)}</button>
     </li>`).join("");
 }
@@ -1593,14 +1610,16 @@ function _renderGroupedHouses(houses, { openByDefault = false } = {}) {
   let html = "";
   for (const [label, items] of Object.entries(groups)) {
     const visited = items.filter(eh => eh.status === "visited").length;
+    const group = label === "Unassigned" ? "" : label;
     html += `<details${openByDefault ? " open" : ""}><summary><strong>${esc(label)}</strong> — ${items.length} houses, ${visited} visited</summary>`;
-    html += `<table><tr><th>#</th><th>Address</th><th>Owner</th><th>Status</th><th></th></tr>`;
+    if (group) html += `<p style="margin:8px 0;"><button class="btn-sm" data-group="${esc(group)}" onclick="openEntryFor(currentEventId, this.dataset.group)">Enter visits</button>
+      <button class="btn-sm" data-group="${esc(group)}" onclick="printWalkSheets(currentEventId, this.dataset.group)">Print walk sheet</button></p>`;
+    html += `<table><tr><th>#</th><th>Address</th><th>Owner</th><th>Status</th></tr>`;
     html += items.map((eh, idx) => `<tr>
       <td>${idx + 1}</td>
       <td>${esc(eh.house.full_address)}</td>
       <td>${esc(eh.house.owner_name) || "—"}</td>
       <td><span class="badge badge-${esc(eh.status)}">${esc(eh.status)}</span></td>
-      <td><button class="btn-sm" onclick="openVisitModal('${esc(currentEventId)}','${esc(eh.id)}','${esc(eh.house.full_address)}')">Visit</button></td>
     </tr>`).join("");
     html += `</table></details>`;
   }
@@ -1643,83 +1662,6 @@ function exportEventHousesCSV() {
     ])
   );
 }
-
-// --- Visits ---
-let _visitRosterLoaded = false;
-async function loadVisitRoster() {
-  const sel = document.getElementById("visit-volunteer-select");
-  try {
-    const r = await authFetch(API + "/api/scout/roster?active_only=true");
-    const roster = await r.json();
-    sel.innerHTML = '<option value="">Select volunteer...</option>' +
-      roster.map(s => `<option value="${esc(s.name)}">${esc(s.name)}${s.scout_id ? " (" + esc(s.scout_id) + ")" : ""}</option>`).join("") +
-      '<option value="__other__">Other (write in)</option>';
-  } catch {
-    sel.innerHTML = '<option value="">Select volunteer...</option><option value="__other__">Other (write in)</option>';
-  }
-  _visitRosterLoaded = true;
-}
-document.getElementById("visit-volunteer-select").onchange = (e) => {
-  document.getElementById("visit-volunteer-other-wrap").style.display =
-    e.target.value === "__other__" ? "" : "none";
-  if (e.target.value !== "__other__") {
-    document.querySelector('#visit-form [name="volunteer_name"]').value = "";
-  }
-};
-document.getElementById("visit-donation-select").onchange = (e) => {
-  document.getElementById("visit-donation-amount-wrap").style.display =
-    e.target.value === "true" ? "" : "none";
-};
-async function openVisitModal(eventId, eventHouseId, address) {
-  const form = document.getElementById("visit-form");
-  form.reset();
-  form.querySelector('[name="event_id"]').value = eventId;
-  form.querySelector('[name="event_house_id"]').value = eventHouseId;
-  document.getElementById("visit-modal-title").textContent =
-    address ? "Record Visit — " + address : "Record Visit";
-  document.getElementById("visit-volunteer-other-wrap").style.display = "none";
-  document.getElementById("visit-donation-amount-wrap").style.display = "none";
-  if (!_visitRosterLoaded) await loadVisitRoster();
-  document.getElementById("visit-modal").classList.remove("hidden");
-}
-function closeVisitModal() {
-  document.getElementById("visit-modal").classList.add("hidden");
-}
-document.getElementById("visit-form").onsubmit = async (e) => {
-  e.preventDefault();
-  const fd = new FormData(e.target);
-  const eventId = fd.get("event_id");
-  const ehId = fd.get("event_house_id");
-  const volSelect = fd.get("volunteer_select");
-  const volunteerName = volSelect === "__other__"
-    ? (fd.get("volunteer_name") || null)
-    : (volSelect || null);
-
-  const toBool = (v) => v === "true" ? true : v === "false" ? false : null;
-
-  const body = {
-    outcome: fd.get("outcome") || null,
-    donation_amount: fd.get("donation_amount") ? parseFloat(fd.get("donation_amount")) : null,
-    tickets_purchased: parseInt(fd.get("tickets_purchased") || "0"),
-    notes: fd.get("notes") || null,
-    follow_up: !!fd.get("follow_up"),
-    volunteer_name: volunteerName,
-    door_answer: toBool(fd.get("door_answer")),
-    donation_given: toBool(fd.get("donation_given")),
-    former_scout: toBool(fd.get("former_scout")),
-    avoid_house: !!fd.get("avoid_house"),
-  };
-  await authFetch(API + `/api/events/${eventId}/houses/${ehId}/visits`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  closeVisitModal();
-  // Refresh whichever list is active
-  if (document.getElementById("page-event-detail").classList.contains("active")) loadEventHouses();
-};
-
-// --- Print packet ---
-function printPacket() { window.print(); }
 
 // --- ArcGIS Fetch ---
 let _arcgisCountTimer = null;
@@ -2031,18 +1973,15 @@ document.getElementById("roster-form").onsubmit = async (e) => {
   }
   e.target.reset();
   loadRoster();
-  _visitRosterLoaded = false;
 };
 async function toggleRosterScout(id) {
   await authFetch(API + "/api/scout/roster/" + id, { method: "PATCH" });
   loadRoster();
-  _visitRosterLoaded = false;
 }
 async function deleteRosterScout(id) {
   if (!confirm("Remove this scout from the roster?")) return;
   await authFetch(API + "/api/scout/roster/" + id, { method: "DELETE" });
   loadRoster();
-  _visitRosterLoaded = false;
 }
 
 async function exportRosterCSV() {
@@ -2068,8 +2007,7 @@ document.getElementById("roster-import-form").onsubmit = async (e) => {
       statusEl.textContent = `Done! ${data.added} scout(s) added, ${data.skipped} skipped (duplicates or empty). Their sign-in codes are in the list below.`;
       e.target.reset();
       loadRoster();
-      _visitRosterLoaded = false;
-    } else {
+        } else {
       statusEl.textContent = "Error: " + (data.detail || JSON.stringify(data));
     }
   } catch (err) {
@@ -2152,7 +2090,7 @@ function renderScoutDataList() {
   const data = _scoutDataCache;
   const listEl = document.getElementById("scout-data-list");
   if (data.length) {
-    listEl.innerHTML = `<table><tr><th>Time</th><th>Scout</th><th>Address</th><th>Group</th><th>Door</th><th>Donation</th><th>Amount</th><th>Former</th><th>Avoid</th><th>Notes</th></tr>` +
+    listEl.innerHTML = `<table><tr><th>Time</th><th>Scout</th><th>Address</th><th>Group</th><th>Door</th><th>Donation</th><th>Amount</th><th>Former</th><th>Avoid</th><th>Notes</th><th>Entered by</th></tr>` +
       data.map(v => `<tr>
         <td>${v.visited_at ? new Date(v.visited_at).toLocaleString() : "—"}</td>
         <td>${esc(v.scout_name)}</td>
@@ -2164,6 +2102,7 @@ function renderScoutDataList() {
         <td>${v.former_scout == null ? "—" : v.former_scout ? "Yes" : "No"}</td>
         <td>${v.avoid_house ? "YES" : "—"}</td>
         <td>${esc(v.notes)}</td>
+        <td>${v.entered_by ? esc(v.entered_by) : "Scout"}</td>
       </tr>`).join("") + `</table>` +
       (data.length < _scoutDataTotal
         ? `<p>Showing ${data.length} of ${_scoutDataTotal} visits. <button class="btn-sm" onclick="loadMoreScoutData()">Load more</button></p>`
@@ -2181,14 +2120,14 @@ async function exportScoutDataCSV() {
   renderScoutDataList();
   if (!_scoutDataCache.length) { alert("No data to export."); return; }
   exportCSV("scout-data.csv",
-    ["Time", "Scout", "Scout ID", "Event", "Group", "Address", "ZIP", "Door Answer", "Donation", "Amount", "Former Scout", "Avoid House", "Notes"],
+    ["Time", "Scout", "Scout ID", "Event", "Group", "Address", "ZIP", "Door Answer", "Donation", "Amount", "Former Scout", "Avoid House", "Notes", "Entered By"],
     _scoutDataCache.map(v => [
       v.visited_at || "", v.scout_name || "", v.scout_id || "", v.event_name || "",
       v.group_label || "", v.address || "", v.zip_code || "",
       v.door_answer == null ? "" : v.door_answer ? "Yes" : "No",
       v.donation_given == null ? "" : v.donation_given ? "Yes" : "No",
       v.donation_amount || "", v.former_scout == null ? "" : v.former_scout ? "Yes" : "No",
-      v.avoid_house ? "Yes" : "No", v.notes || "",
+      v.avoid_house ? "Yes" : "No", v.notes || "", v.entered_by || "Scout",
     ])
   );
 }
@@ -2334,8 +2273,24 @@ document.getElementById("form-field-create").onsubmit = async (e) => {
 
 // --- Init ---
 _checkAuth().then(() => {
-  if (_authToken) loadDashboard();
+  if (!_authToken) return;
+  // Reopen the last page (handy when a phone reloads the tab mid-walk)
+  let last = "dashboard";
+  try { last = localStorage.getItem("scoutmap_page") || "dashboard"; } catch { /* ok */ }
+  showPage(document.getElementById("page-" + last) && last !== "event-detail" ? last : "dashboard");
 });
+
+// Keeps pages and data available when the signal drops (see /sw.js)
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => { /* offline support is optional */ });
+  // Save this page and its scripts now, so it still opens later with no signal
+  window.addEventListener("load", () => {
+    if (!window.caches) return;
+    const urls = ["/", ...[...document.querySelectorAll("script[src], link[rel=stylesheet]")]
+      .map(el => el.src || el.href).filter(u => u.startsWith(location.origin))];
+    caches.open("scoutmap-v1").then(c => c.addAll(urls)).catch(() => { /* ok */ });
+  });
+}
 
 /**
  * Reset all house filter inputs and reload the full list.
