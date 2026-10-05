@@ -1,4 +1,4 @@
-"""Workflow tests: generated scout passwords, map grouping, walk groups, dashboard checklist."""
+"""Workflow tests: scout login codes, map grouping, walk groups, dashboard checklist."""
 
 import io
 
@@ -29,64 +29,93 @@ def _event_with_houses(db, houses):
     return ev, rows
 
 
-# --- Scout passwords ---------------------------------------------------------
+# --- Scout login codes -------------------------------------------------------
 
-def _login(client, roster_id, password):
-    return client.post("/api/auth/scout-login", json={"scout_id": roster_id, "password": password})
+def _login(client, code):
+    return client.post("/api/auth/scout-login", json={"code": code})
 
 
-def test_new_scout_gets_six_digit_password_that_works(client, db):
-    r = client.post("/api/scout/roster", json={"name": "Jane Doe"}, headers=_admin(db))
-    scout = r.json()
-    assert len(scout["password"]) == 6 and scout["password"].isdigit()
-    assert scout["has_password"]
-    assert _login(client, scout["id"], scout["password"]).status_code == 200
-    # The password is never returned again
+def test_new_scout_gets_code_and_signs_in_with_it_alone(client, db):
+    scout = client.post("/api/scout/roster", json={"name": "Jane Doe"}, headers=_admin(db)).json()
+    code = scout["login_code"]
+    assert len(code) == 6 and code.isdigit()
+    r = _login(client, code)
+    assert r.status_code == 200 and r.json()["scout_name"] == "Jane Doe"
+    # The scout app learns the full name from /me
+    me = client.get("/api/auth/me", headers={"Authorization": "Bearer " + r.json()["token"]}).json()
+    assert me == {"email": f"scout:{scout['id']}", "is_scout": True, "name": "Jane Doe"}
+    # Admins can always see the code again
     roster = client.get("/api/scout/roster", headers=_admin(db)).json()
-    assert roster[0]["password"] is None
+    assert roster[0]["login_code"] == code
 
 
-def test_regenerate_replaces_password_and_signs_out(client, db):
+def test_wrong_or_inactive_code_fails(client, db):
+    db.add_all([ScoutRoster(name="Active", login_code="111111"),
+                ScoutRoster(name="Gone", login_code="222222", active=False)])
+    db.commit()
+    assert _login(client, "999999").status_code == 401
+    assert _login(client, "222222").status_code == 401
+    assert _login(client, "12").status_code == 401
+    assert _login(client, " 111 111 ").status_code == 200  # spaces are ignored
+
+
+def test_regenerate_replaces_code_and_signs_out(client, db):
     headers = _admin(db)
     scout = client.post("/api/scout/roster", json={"name": "Jane Doe"}, headers=headers).json()
-    token = _login(client, scout["id"], scout["password"]).json()["token"]
+    token = _login(client, scout["login_code"]).json()["token"]
 
-    new = client.post(f"/api/auth/scout-password/{scout['id']}/regenerate", headers=headers).json()
-    assert new["password"] != scout["password"] or len(new["password"]) == 6
-    assert _login(client, scout["id"], new["password"]).status_code == 200
-    if new["password"] != scout["password"]:
-        assert _login(client, scout["id"], scout["password"]).status_code == 401
+    new = client.post(f"/api/auth/scout-code/{scout['id']}/regenerate", headers=headers).json()
+    assert new["login_code"] != scout["login_code"]
+    assert _login(client, new["login_code"]).status_code == 200
+    assert _login(client, scout["login_code"]).status_code == 401
     # Old session no longer works
     assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
 
 
-def test_generate_missing_passwords(client, db):
-    db.add_all([ScoutRoster(name="No Pass"), ScoutRoster(name="Has Pass", password_hash=auth._hash_password("123456"))])
-    db.commit()
-    r = client.post("/api/auth/scout-passwords/generate-missing", headers=_admin(db)).json()
-    assert [p["name"] for p in r["passwords"]] == ["No Pass"]
+def test_codes_are_unique(client, db):
+    lines = "name\n" + "\n".join(f"Scout {i}" for i in range(200))
+    r = client.post("/api/scout/roster/import", files={"file": ("r.csv", io.BytesIO(lines.encode()), "text/csv")},
+                    headers=_admin(db)).json()
+    codes = [s["login_code"] for s in r["scouts"]]
+    assert r["added"] == 200 and len(set(codes)) == 200
 
 
-def test_csv_import_returns_passwords(client, db):
-    csv_file = io.BytesIO(b"name,scout_id,password\nJohn Smith,123,ignored\nAlex Lee,,\n")
+def test_csv_import_returns_codes(client, db):
+    csv_file = io.BytesIO(b"name,scout_id\nJohn Smith,123\nAlex Lee,\n")
     r = client.post("/api/scout/roster/import", files={"file": ("r.csv", csv_file, "text/csv")},
                     headers=_admin(db)).json()
-    assert r["added"] == 2
-    assert {p["name"] for p in r["passwords"]} == {"John Smith", "Alex Lee"}
-    assert all(len(p["password"]) == 6 for p in r["passwords"])
+    assert {s["name"] for s in r["scouts"]} == {"John Smith", "Alex Lee"}
+    assert all(len(s["login_code"]) == 6 for s in r["scouts"])
 
 
-def test_scouts_cannot_regenerate_passwords(client, db):
-    s = ScoutRoster(name="Jane Doe")
+def test_scouts_cannot_regenerate_codes(client, db):
+    s = ScoutRoster(name="Jane Doe", login_code="123456")
     db.add(s)
     db.commit()
-    r = client.post(f"/api/auth/scout-password/{s.id}/regenerate", headers=_session(db, f"scout:{s.id}"))
+    r = client.post(f"/api/auth/scout-code/{s.id}/regenerate", headers=_session(db, f"scout:{s.id}"))
     assert r.status_code == 403
 
 
-def test_short_names_stay_distinguishable():
-    names = ["Jack Smith", "Jack Stone", "Jane Doe", "Sam Lee", "Sam Lee"]
-    assert auth._short_names(names) == ["Jack Sm.", "Jack St.", "Jane D.", "Sam L. (1)", "Sam L. (2)"]
+def test_many_correct_logins_from_one_wifi_are_fine(client, db):
+    db.add(ScoutRoster(name="Jane", login_code="123456"))
+    db.commit()
+    assert all(_login(client, "123456").status_code == 200 for _ in range(25))
+
+
+def test_guessing_codes_gets_blocked(client, db):
+    db.add(ScoutRoster(name="Jane", login_code="123456"))
+    db.commit()
+    for i in range(10):
+        assert _login(client, f"{i:06d}").status_code == 401
+    # Blocked now, even with the right code
+    assert _login(client, "123456").status_code == 429
+
+
+def test_guessing_from_many_addresses_hits_overall_cap(client, db):
+    # Simulate failures already recorded from many different addresses
+    import time
+    auth._failed_scout_logins["all"] = [time.time()] * auth._SCOUT_FAIL_MAX_TOTAL
+    assert _login(client, "000000").status_code == 429
 
 
 # --- Map grouping ------------------------------------------------------------
@@ -146,12 +175,12 @@ def test_scout_group_list_sorts_numbers_naturally(client, db):
 def test_checklist_counts(client, db):
     ev, rows = _event_with_houses(db, [("1", "ELM", "G1"), ("2", "ELM", "G1"), ("3", "OAK", None)])
     db.add(Visit(event_house_id=rows[0].id, scout_name="Jane", donation_amount=20))
-    db.add_all([ScoutRoster(name="Ready", password_hash="x"), ScoutRoster(name="NoPass")])
+    db.add_all([ScoutRoster(name="Ready", login_code="111111"), ScoutRoster(name="Gone", login_code="222222", active=False)])
     db.commit()
     c = client.get(f"/api/stats/checklist?event_id={ev.id}", headers=_admin(db)).json()
     assert c["houses"] == 3 and c["grouped"] == 2 and c["groups"] == 1
     assert c["visits"] == 1 and c["houses_visited"] == 1 and c["donations"] == 20
-    assert c["scouts_ready"] == 1 and c["scouts_no_password"] == 1
+    assert c["scouts_ready"] == 1
 
 
 # --- Caching -----------------------------------------------------------------

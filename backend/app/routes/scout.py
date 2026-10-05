@@ -16,7 +16,7 @@ from app.database import get_db
 from app.models import (
     AuthSession, FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster,
 )
-from app.routes.auth import _short_names, get_current_user, new_scout_password, require_admin
+from app.routes.auth import new_scout_code, require_admin
 
 router = APIRouter(prefix="/api/scout", tags=["scout"])
 
@@ -39,8 +39,7 @@ class RosterOut(BaseModel):
     name: str
     scout_id: Optional[str] = None
     active: bool = True
-    has_password: bool = False
-    password: Optional[str] = None  # only filled in right after it's generated
+    login_code: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -49,21 +48,15 @@ class RosterOut(BaseModel):
 @router.get("/roster", response_model=list[RosterOut])
 def list_roster(
     active_only: bool = False,
-    user: str = Depends(get_current_user),
+    _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    # Scouts only see "First L." — full names are for admins
-    is_scout = user.startswith("scout:")
     q = db.query(ScoutRoster)
     if active_only:
         q = q.filter(ScoutRoster.active == True)  # noqa: E712
-    scouts = q.order_by(ScoutRoster.name).all()
-    names = _short_names([s.name for s in scouts]) if is_scout else [s.name for s in scouts]
     return [
-        RosterOut(id=str(s.id), name=name,
-                  scout_id=None if is_scout else s.scout_id, active=s.active,
-                  has_password=bool(s.password_hash))
-        for s, name in zip(scouts, names)
+        RosterOut(id=str(s.id), name=s.name, scout_id=s.scout_id, active=s.active, login_code=s.login_code)
+        for s in q.order_by(ScoutRoster.name).all()
     ]
 
 
@@ -72,10 +65,9 @@ def add_scout(body: RosterCreate, _admin: str = Depends(require_admin), db: Sess
     s = ScoutRoster(name=body.name.strip(), scout_id=body.scout_id)
     db.add(s)
     db.flush()  # assigns s.id
-    password = new_scout_password(s, db)
+    code = new_scout_code(s, db)
     db.commit()
-    return RosterOut(id=str(s.id), name=s.name, scout_id=s.scout_id, active=s.active,
-                     has_password=True, password=password)
+    return RosterOut(id=str(s.id), name=s.name, scout_id=s.scout_id, active=s.active, login_code=code)
 
 
 @router.delete("/roster/{roster_id}")
@@ -97,7 +89,7 @@ async def import_roster_csv(file: UploadFile = File(...), _admin: str = Depends(
       scout_id — Scout ID number (optional)
 
     Extra columns are ignored. Duplicate names (case-insensitive) are skipped.
-    Each new scout gets a random 6-digit password, returned once in the response.
+    Each new scout gets a unique login code.
     """
     content = await file.read()
     text = content.decode("utf-8-sig")  # handle BOM from Excel
@@ -123,6 +115,7 @@ async def import_roster_csv(file: UploadFile = File(...), _admin: str = Depends(
 
     added = []
     skipped = 0
+    used_codes = {c for (c,) in db.query(ScoutRoster.login_code).filter(ScoutRoster.login_code.isnot(None)).all()}
     for row in reader:
         name = (row.get("name") or "").strip()
         if not name:
@@ -136,11 +129,11 @@ async def import_roster_csv(file: UploadFile = File(...), _admin: str = Depends(
         scout = ScoutRoster(name=name, scout_id=scout_id)
         db.add(scout)
         db.flush()  # assigns scout.id
-        added.append({"name": name, "password": new_scout_password(scout, db)})
+        added.append({"name": name, "login_code": new_scout_code(scout, db, used_codes)})
         existing.add(name.lower())
 
     db.commit()
-    return {"added": len(added), "skipped": skipped, "passwords": added}
+    return {"added": len(added), "skipped": skipped, "scouts": added}
 
 
 @router.patch("/roster/{roster_id}")

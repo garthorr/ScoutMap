@@ -75,13 +75,10 @@ def checklist(event_id: uuid.UUID, db: Session = Depends(get_db)):
         .filter(EventHouse.event_id == event_id)
         .one()
     )
-    scouts_ready, scouts_no_password = (
-        db.query(
-            func.count(ScoutRoster.password_hash),
-            func.count(ScoutRoster.id) - func.count(ScoutRoster.password_hash),
-        )
+    scouts_ready = (
+        db.query(func.count(ScoutRoster.login_code))
         .filter(ScoutRoster.active == True)  # noqa: E712
-        .one()
+        .scalar()
     )
     return {
         "houses": houses,
@@ -91,5 +88,4 @@ def checklist(event_id: uuid.UUID, db: Session = Depends(get_db)):
         "houses_visited": houses_visited,
         "donations": float(donations or 0),
         "scouts_ready": scouts_ready,
-        "scouts_no_password": scouts_no_password,
     }

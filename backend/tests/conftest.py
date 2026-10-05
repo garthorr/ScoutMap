@@ -40,6 +40,7 @@ def db():
 @pytest.fixture
 def client():
     auth._rate_limit_store.clear()
+    auth._failed_scout_logins.clear()
     with TestClient(app) as c:
         yield c
 

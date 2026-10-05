@@ -377,9 +377,9 @@ function _renderChecklist(eventId, c) {
       action: "Open map", go: `openMapForEvent('${ev}')`,
     },
     {
-      title: "Add scouts", done: c?.scouts_ready > 0 && !c.scouts_no_password,
-      detail: !c ? "Add scouts to the roster."
-        : `${c.scouts_ready} scout(s) can sign in` + (c.scouts_no_password ? ` · ${c.scouts_no_password} still need a password` : ""),
+      title: "Add scouts", done: c?.scouts_ready > 0,
+      detail: c?.scouts_ready ? `${c.scouts_ready} scout(s) with sign-in codes · print their cards from the Scouts page`
+        : "Add scouts to the roster. Each one gets a sign-in code.",
       action: "Scouts", go: "showPage('roster')",
     },
     {
@@ -1949,22 +1949,16 @@ async function loadRoster() {
   const r = await authFetch(API + "/api/scout/roster");
   const roster = await r.json();
   _rosterCache = roster;
-
-  const missing = roster.filter(s => s.active && !s.has_password).length;
-  document.getElementById("roster-missing-passwords").innerHTML = missing
-    ? `<div class="card card-highlight">${missing} active scout(s) don't have a password yet, so they can't sign in.
-        <button class="btn-sm" onclick="generateMissingPasswords()" style="margin-left:8px;">Create passwords</button></div>`
-    : "";
-
   document.getElementById("roster-list").innerHTML = roster.length
-    ? `<table><tr><th>Name</th><th>Scout ID</th><th>Status</th><th>Password</th><th></th></tr>` +
-      roster.map(s => `<tr>
+    ? `<table><tr><th>Name</th><th>Scout ID</th><th>Status</th><th>Sign-in Code</th><th></th></tr>` +
+      roster.map(s => `<tr${s.active ? "" : ' style="opacity:.55;"'}>
         <td>${esc(s.name)}</td>
         <td>${esc(s.scout_id) || "—"}</td>
         <td><span class="badge badge-${s.active ? "completed" : "pending"}">${s.active ? "Active" : "Inactive"}</span></td>
-        <td>${s.has_password ? '<span class="badge badge-completed">Set</span>' : '<span class="badge badge-pending">None</span>'}</td>
+        <td><code class="login-code">${esc(s.login_code) || "—"}</code></td>
         <td>
-          <button class="btn-sm" onclick="regenerateScoutPassword('${esc(s.id)}')">New password</button>
+          <button class="btn-sm" onclick="printScoutCards('${esc(s.id)}')">Print card</button>
+          <button class="btn-sm" onclick="regenerateScoutCode('${esc(s.id)}')">New code</button>
           <button class="btn-sm" onclick="toggleRosterScout('${esc(s.id)}')">${s.active ? "Deactivate" : "Activate"}</button>
           <button class="btn-sm btn-danger" onclick="deleteRosterScout('${esc(s.id)}')">Delete</button>
         </td>
@@ -1972,60 +1966,45 @@ async function loadRoster() {
     : "<p>No scouts in roster. Add scouts above.</p>";
 }
 
-// Passwords are only visible right after they're created, so show them prominently
-let _newPasswords = [];
-function showNewPasswords(list, heading) {
-  const el = document.getElementById("roster-new-passwords");
-  _newPasswords = list;
-  if (!list.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
-  el.classList.remove("hidden");
-  el.innerHTML = `<h3>${esc(heading)}</h3>
-    <p class="help-text">Write these down, print them, or download them now. They won't be shown again.</p>
-    <table><tr><th>Scout</th><th>Password</th></tr>` +
-    list.map(p => `<tr><td>${esc(p.name)}</td><td><code style="font-size:18px;letter-spacing:3px;">${esc(p.password)}</code></td></tr>`).join("") +
-    `</table>
-    <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
-      <button class="btn-sm" onclick="printNewPasswords()">Print</button>
-      <button class="btn-sm" onclick="exportCSV('scout-passwords.csv', ['name', 'password'], _newPasswords.map(p => [p.name, p.password]))">Download CSV</button>
-      <button class="btn-sm btn-quiet" onclick="showNewPasswords([])">Done</button>
-    </div>`;
-  el.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-function printNewPasswords() {
+/** Print cut-out sign-in cards: one scout (rosterId) or every active scout. */
+async function printScoutCards(rosterId) {
+  if (!_rosterCache.length) await loadRoster();
+  const scouts = rosterId
+    ? _rosterCache.filter(s => s.id === rosterId)
+    : _rosterCache.filter(s => s.active && s.login_code);
+  if (!scouts.length) { alert("No active scouts to print."); return; }
   const w = window.open("", "_blank");
-  if (!w) { alert("Allow pop-ups to print, or use Download CSV."); return; }
-  w.document.write(`<!doctype html><title>Scout passwords</title>
-    <style>body{font-family:sans-serif;padding:24px}td,th{border:1px solid #999;padding:10px 16px;text-align:left}
-    table{border-collapse:collapse}code{font-size:20px;letter-spacing:3px}</style>
-    <h2>ScoutMap passwords</h2><p>Sign in at ${esc(location.origin)}/scout</p>
-    <table><tr><th>Scout</th><th>Password</th></tr>` +
-    _newPasswords.map(p => `<tr><td>${esc(p.name)}</td><td><code>${esc(p.password)}</code></td></tr>`).join("") +
-    `</table>`);
+  if (!w) { alert("Allow pop-ups to print, or use Export CSV."); return; }
+  const url = location.origin + "/scout";
+  w.document.write(`<!doctype html><title>ScoutMap sign-in cards</title>
+    <style>
+      body { font-family: sans-serif; margin: 16px; }
+      .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(3.2in, 1fr)); gap: 12px; }
+      .card { border: 2px dashed #888; border-radius: 10px; padding: 16px; break-inside: avoid; }
+      .name { font-size: 18px; font-weight: 700; }
+      .code { font: 700 34px monospace; letter-spacing: 6px; margin: 10px 0; }
+      .how { font-size: 13px; color: #444; }
+    </style>
+    <div class="cards">` +
+    scouts.map(s => `<div class="card">
+      <div class="name">${esc(s.name)}</div>
+      <div class="code">${esc(s.login_code)}</div>
+      <div class="how">Go to <b>${esc(url)}</b> and type this code to sign in. Keep it to yourself.</div>
+    </div>`).join("") + `</div>`);
   w.document.close();
   w.focus();
   w.print();
 }
 
-async function regenerateScoutPassword(rosterId) {
+async function regenerateScoutCode(rosterId) {
   const scout = _rosterCache.find(s => s.id === rosterId);
   if (!scout) return;
-  if (scout.has_password && !confirm(`Make a new password for ${scout.name}?\n\nTheir old password will stop working and they'll be signed out.`)) return;
+  if (!confirm(`Give ${scout.name} a new code?\n\nTheir old code will stop working and they'll be signed out.`)) return;
   try {
-    const r = await authFetch(API + `/api/auth/scout-password/${rosterId}/regenerate`, { method: "POST" });
+    const r = await authFetch(API + `/api/auth/scout-code/${rosterId}/regenerate`, { method: "POST" });
     const d = await r.json();
-    if (!r.ok) { alert(d.detail || "Error creating password."); return; }
-    showNewPasswords([d], `New password for ${d.name}`);
-    loadRoster();
-  } catch (err) { alert("Network error: " + err.message); }
-}
-
-async function generateMissingPasswords() {
-  try {
-    const r = await authFetch(API + "/api/auth/scout-passwords/generate-missing", { method: "POST" });
-    const d = await r.json();
-    if (!r.ok) { alert(d.detail || "Error creating passwords."); return; }
-    showNewPasswords(d.passwords, "New scout passwords");
+    if (!r.ok) { alert(d.detail || "Error making a new code."); return; }
+    _flashStatus(`New code for ${d.name}: ${d.login_code}`, 6000);
     loadRoster();
   } catch (err) { alert("Network error: " + err.message); }
 }
@@ -2039,7 +2018,7 @@ document.getElementById("roster-form").onsubmit = async (e) => {
   });
   if (r.ok) {
     const scout = await r.json();
-    showNewPasswords([scout], `Password for ${scout.name}`);
+    _flashStatus(`Added ${scout.name}. Sign-in code: ${scout.login_code}`, 6000);
   } else {
     const d = await r.json().catch(() => ({}));
     alert(d.detail || "Error adding scout.");
@@ -2065,8 +2044,8 @@ async function exportRosterCSV() {
   const roster = await r.json();
   if (!roster.length) { alert("No scouts to export."); return; }
   exportCSV("scout-roster.csv",
-    ["name", "scout_id"],
-    roster.map(s => [s.name, s.scout_id || ""])
+    ["name", "scout_id", "active", "login_code"],
+    roster.map(s => [s.name, s.scout_id || "", s.active ? "yes" : "no", s.login_code || ""])
   );
 }
 
@@ -2080,8 +2059,7 @@ document.getElementById("roster-import-form").onsubmit = async (e) => {
     const r = await authFetch(API + "/api/scout/roster/import", { method: "POST", body: fd });
     const data = await r.json();
     if (r.ok) {
-      statusEl.textContent = `Done! ${data.added} scout(s) added, ${data.skipped} skipped (duplicates or empty).`;
-      showNewPasswords(data.passwords || [], "Passwords for imported scouts");
+      statusEl.textContent = `Done! ${data.added} scout(s) added, ${data.skipped} skipped (duplicates or empty). Their sign-in codes are in the list below.`;
       e.target.reset();
       loadRoster();
       _visitRosterLoaded = false;

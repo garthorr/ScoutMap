@@ -1,12 +1,10 @@
-"""Authentication endpoints – email OTP login flow + scout password login."""
+"""Authentication endpoints – email OTP login flow + scout login codes."""
 
-import hashlib
 import logging
-import os
 import secrets
-import uuid
 import smtplib
-from collections import Counter
+import time
+import uuid
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from fnmatch import fnmatch
@@ -50,41 +48,8 @@ def _is_email_allowed(email: str, db: Session) -> bool:
     return any(fnmatch(email, row.email.strip().lower()) for row in patterns)
 
 
-def _short_name(name: str, letters: int = 1) -> str:
-    """'Jane Doe' -> 'Jane D.' (protects minors' full names)."""
-    parts = (name or "").split()
-    if len(parts) < 2:
-        return name or ""
-    return f"{parts[0]} {parts[-1][:letters].capitalize()}."
-
-
-def _short_names(names: list[str]) -> list[str]:
-    """Short names for a list, kept distinguishable.
-
-    Two "Jack S." become "Jack Sm." and "Jack St."; identical names
-    get a number: "Sam L. (1)", "Sam L. (2)".
-    """
-    # Lengthen the last-name part only between *different* full names
-    keys = [" ".join((n or "").lower().split()) for n in names]
-    original = dict(zip(keys, names))
-    short = {k: _short_name(original[k]) for k in original}
-    for letters in range(2, 6):
-        counts = Counter(short.values())
-        if all(c == 1 for c in counts.values()):
-            break
-        short = {k: _short_name(original[k], letters) if counts[v] > 1 else v for k, v in short.items()}
-
-    # Number whatever still looks the same
-    result = [short[k] for k in keys]
-    totals, seen, out = Counter(result), Counter(), []
-    for r in result:
-        seen[r] += 1
-        out.append(f"{r} ({seen[r]})" if totals[r] > 1 else r)
-    return out
-
-
-def _generate_code() -> str:
-    return "".join(str(_rng.randint(0, 9)) for _ in range(6))
+def _generate_code(length: int = 6) -> str:
+    return "".join(str(_rng.randint(0, 9)) for _ in range(length))
 
 
 def _send_code_email(email: str, code: str):
@@ -185,7 +150,6 @@ _MAX_CODE_ATTEMPTS = 5    # wrong guesses before a login code is cancelled
 
 def _check_rate_limit(key: str):
     """Raise 429 if too many attempts for key within the window."""
-    import time
     global _rate_limit_last_cleanup
     now = time.time()
     window_start = now - _RATE_LIMIT_WINDOW
@@ -330,9 +294,15 @@ def logout(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/me")
-def auth_me(email: str = Depends(get_current_user)):
-    """Return the current user's email (for UI display)."""
-    return {"email": email}
+def auth_me(email: str = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Return who is signed in (for UI display)."""
+    if email.startswith("scout:"):
+        try:
+            scout = db.query(ScoutRoster).filter(ScoutRoster.id == uuid.UUID(email[6:])).first()
+        except ValueError:
+            scout = None
+        return {"email": email, "is_scout": True, "name": scout.name if scout else ""}
+    return {"email": email, "is_scout": False, "name": email}
 
 
 # ---------------------------------------------------------------------------
@@ -382,59 +352,53 @@ def remove_allowed_email(
 
 
 # ---------------------------------------------------------------------------
-# Password hashing helpers (PBKDF2 — stdlib, no extra dependency)
+# Scout login: just a 6-digit code (no name to pick, so no public list of scouts).
+# Codes are stored as-is so admins can see, print and export them.
 # ---------------------------------------------------------------------------
-def _hash_password(password: str) -> str:
-    salt = os.urandom(16)
-    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260_000)
-    return salt.hex() + ":" + dk.hex()
+SCOUT_CODE_LENGTH = 6
+
+# Only *wrong* codes count, so a whole troop signing in on one Wi-Fi isn't blocked.
+# The overall cap stops someone guessing codes from many addresses at once.
+_failed_scout_logins: dict[str, list[float]] = {}
+_SCOUT_FAIL_WINDOW = 900      # 15 minutes
+_SCOUT_FAIL_MAX_PER_IP = 10
+_SCOUT_FAIL_MAX_TOTAL = 50
 
 
-def _verify_password(password: str, stored: str) -> bool:
-    try:
-        salt_hex, dk_hex = stored.split(":", 1)
-        salt = bytes.fromhex(salt_hex)
-        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260_000)
-        return secrets.compare_digest(dk.hex(), dk_hex)
-    except Exception:
-        return False
+def _recent_failures(key: str) -> list[float]:
+    cutoff = time.time() - _SCOUT_FAIL_WINDOW
+    recent = [t for t in _failed_scout_logins.get(key, []) if t > cutoff]
+    _failed_scout_logins[key] = recent
+    return recent
 
 
-# ---------------------------------------------------------------------------
-# Scout password login (no email required)
-# ---------------------------------------------------------------------------
 class ScoutLoginBody(BaseModel):
-    scout_id: uuid.UUID  # roster row id
-    password: str
-
-
-@router.get("/scout-roster")
-def public_scout_roster(db: Session = Depends(get_db)):
-    """Public list of active scouts with passwords set (for login dropdown)."""
-    scouts = db.query(ScoutRoster).filter(
-        ScoutRoster.active == True,  # noqa: E712
-        ScoutRoster.password_hash.isnot(None),
-    ).order_by(ScoutRoster.name).all()
-    names = _short_names([s.name for s in scouts])
-    return [{"id": str(s.id), "name": n} for s, n in zip(scouts, names)]
+    code: str
 
 
 @router.post("/scout-login")
 def scout_login(body: ScoutLoginBody, request: Request, db: Session = Depends(get_db)):
-    """Authenticate a scout by roster ID + password. Returns a session token."""
-    _check_rate_limit(f"scout:{request.client.host}")
-    # Per-scout limit too, so a 6-digit password can't be guessed from many IPs
-    _check_rate_limit(f"scout-id:{body.scout_id}")
-    scout = db.query(ScoutRoster).filter(
-        ScoutRoster.id == body.scout_id,
-        ScoutRoster.active == True,  # noqa: E712
-    ).first()
+    """Sign a scout in with their login code. Returns a session token."""
+    ip_key = f"ip:{request.client.host}"
+    if len(_failed_scout_logins) > 1000:  # forget addresses with no recent failures
+        for key in [k for k in _failed_scout_logins if not _recent_failures(k)]:
+            del _failed_scout_logins[key]
+    if (len(_recent_failures(ip_key)) >= _SCOUT_FAIL_MAX_PER_IP
+            or len(_recent_failures("all")) >= _SCOUT_FAIL_MAX_TOTAL):
+        raise HTTPException(429, "Too many wrong codes. Please wait a few minutes and try again.")
 
-    if not scout or not scout.password_hash:
-        raise HTTPException(401, "Invalid scout or password not set")
-
-    if not _verify_password(body.password, scout.password_hash):
-        raise HTTPException(401, "Incorrect password")
+    code = "".join(ch for ch in body.code if ch.isdigit())
+    scout = None
+    if len(code) == SCOUT_CODE_LENGTH:
+        scout = db.query(ScoutRoster).filter(
+            ScoutRoster.login_code == code,
+            ScoutRoster.active == True,  # noqa: E712
+        ).first()
+    if not scout:
+        now = time.time()
+        _failed_scout_logins.setdefault(ip_key, []).append(now)
+        _failed_scout_logins.setdefault("all", []).append(now)
+        raise HTTPException(401, "That code didn't work. Check it and try again.")
 
     token = secrets.token_hex(32)
     session = AuthSession(
@@ -454,40 +418,33 @@ def scout_login(body: ScoutLoginBody, request: Request, db: Session = Depends(ge
     }
 
 
-# ---------------------------------------------------------------------------
-# Scout passwords: always 6 random digits, generated by the server.
-# Only the hash is stored, so a password is shown once — when it's made.
-# ---------------------------------------------------------------------------
-def new_scout_password(scout: ScoutRoster, db: Session) -> str:
-    """Give a scout a fresh 6-digit password and sign out their old sessions."""
-    password = _generate_code()
-    scout.password_hash = _hash_password(password)
+def new_scout_code(scout: ScoutRoster, db: Session, used: set[str] | None = None) -> str:
+    """Give a scout a fresh, unused login code and sign out their old sessions.
+
+    Pass `used` when making many codes in one go (e.g. a CSV import), so codes
+    not yet saved to the database are still treated as taken.
+    """
+    if used is None:
+        used = {c for (c,) in db.query(ScoutRoster.login_code).filter(ScoutRoster.login_code.isnot(None)).all()}
+    code = _generate_code(SCOUT_CODE_LENGTH)
+    while code in used:
+        code = _generate_code(SCOUT_CODE_LENGTH)
+    used.add(code)
+    scout.login_code = code
     db.query(AuthSession).filter(AuthSession.email == f"scout:{scout.id}").delete()
-    return password
+    return code
 
 
-@router.post("/scout-password/{roster_id}/regenerate")
-def regenerate_scout_password(
+@router.post("/scout-code/{roster_id}/regenerate")
+def regenerate_scout_code(
     roster_id: uuid.UUID,
     email: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Admin replaces a scout's password with a new random one."""
+    """Admin replaces a scout's login code (e.g. it was lost or shared)."""
     scout = db.query(ScoutRoster).filter(ScoutRoster.id == roster_id).first()
     if not scout:
         raise HTTPException(404, "Scout not found")
-    password = new_scout_password(scout, db)
+    code = new_scout_code(scout, db)
     db.commit()
-    return {"name": scout.name, "password": password}
-
-
-@router.post("/scout-passwords/generate-missing")
-def generate_missing_scout_passwords(
-    email: str = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Give every scout who has no password a new one."""
-    scouts = db.query(ScoutRoster).filter(ScoutRoster.password_hash.is_(None)).order_by(ScoutRoster.name).all()
-    result = [{"name": s.name, "password": new_scout_password(s, db)} for s in scouts]
-    db.commit()
-    return {"passwords": result}
+    return {"name": scout.name, "login_code": code}
