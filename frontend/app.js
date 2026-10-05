@@ -1944,6 +1944,12 @@ document.getElementById("manual-house-form").onsubmit = async (e) => {
 
 // --- Roster ---
 let _rosterCache = [];
+
+/** Show codes as "1234 5678" so they're easy to read and type (sign-in ignores the space). */
+function fmtCode(code) {
+  return code && code.length === 8 ? code.slice(0, 4) + " " + code.slice(4) : (code || "");
+}
+
 async function loadRoster() {
   document.getElementById("roster-list").innerHTML = '<div class="loading-bar"></div>';
   const r = await authFetch(API + "/api/scout/roster");
@@ -1955,7 +1961,7 @@ async function loadRoster() {
         <td>${esc(s.name)}</td>
         <td>${esc(s.scout_id) || "—"}</td>
         <td><span class="badge badge-${s.active ? "completed" : "pending"}">${s.active ? "Active" : "Inactive"}</span></td>
-        <td><code class="login-code">${esc(s.login_code) || "—"}</code></td>
+        <td><code class="login-code">${esc(fmtCode(s.login_code)) || "—"}</code></td>
         <td>
           <button class="btn-sm" onclick="printScoutCards('${esc(s.id)}')">Print card</button>
           <button class="btn-sm" onclick="regenerateScoutCode('${esc(s.id)}')">New code</button>
@@ -1988,7 +1994,7 @@ async function printScoutCards(rosterId) {
     <div class="cards">` +
     scouts.map(s => `<div class="card">
       <div class="name">${esc(s.name)}</div>
-      <div class="code">${esc(s.login_code)}</div>
+      <div class="code">${esc(fmtCode(s.login_code))}</div>
       <div class="how">Go to <b>${esc(url)}</b> and type this code to sign in. Keep it to yourself.</div>
     </div>`).join("") + `</div>`);
   w.document.close();
@@ -2004,7 +2010,7 @@ async function regenerateScoutCode(rosterId) {
     const r = await authFetch(API + `/api/auth/scout-code/${rosterId}/regenerate`, { method: "POST" });
     const d = await r.json();
     if (!r.ok) { alert(d.detail || "Error making a new code."); return; }
-    _flashStatus(`New code for ${d.name}: ${d.login_code}`, 6000);
+    _flashStatus(`New code for ${d.name}: ${fmtCode(d.login_code)}`, 6000);
     loadRoster();
   } catch (err) { alert("Network error: " + err.message); }
 }
@@ -2018,7 +2024,7 @@ document.getElementById("roster-form").onsubmit = async (e) => {
   });
   if (r.ok) {
     const scout = await r.json();
-    _flashStatus(`Added ${scout.name}. Sign-in code: ${scout.login_code}`, 6000);
+    _flashStatus(`Added ${scout.name}. Sign-in code: ${fmtCode(scout.login_code)}`, 6000);
   } else {
     const d = await r.json().catch(() => ({}));
     alert(d.detail || "Error adding scout.");
@@ -2045,7 +2051,7 @@ async function exportRosterCSV() {
   if (!roster.length) { alert("No scouts to export."); return; }
   exportCSV("scout-roster.csv",
     ["name", "scout_id", "active", "login_code"],
-    roster.map(s => [s.name, s.scout_id || "", s.active ? "yes" : "no", s.login_code || ""])
+    roster.map(s => [s.name, s.scout_id || "", s.active ? "yes" : "no", fmtCode(s.login_code)])
   );
 }
 

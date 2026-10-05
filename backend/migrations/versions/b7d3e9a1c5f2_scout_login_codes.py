@@ -29,9 +29,9 @@ def upgrade() -> None:
     conn = op.get_bind()
     used = set()
     for (scout_id,) in conn.execute(sa.text("SELECT id FROM scout_roster")).fetchall():
-        code = f"{secrets.randbelow(10**6):06d}"
+        code = f"{secrets.randbelow(10**8):08d}"
         while code in used:
-            code = f"{secrets.randbelow(10**6):06d}"
+            code = f"{secrets.randbelow(10**8):08d}"
         used.add(code)
         conn.execute(sa.text("UPDATE scout_roster SET login_code = :code WHERE id = :id"),
                      {"code": code, "id": scout_id})

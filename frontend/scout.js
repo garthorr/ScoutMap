@@ -17,6 +17,7 @@ let formFields = []; // dynamic field config from server
 // --- Auth ---
 let _authToken = localStorage.getItem("scoutmap_token") || "";
 let isScoutSession = false;  // true when a scout signed in with their code (vs. an admin)
+const SCOUT_CODE_LENGTH = 8;
 
 function authFetch(url, opts = {}) {
   opts.headers = opts.headers || {};
@@ -79,7 +80,7 @@ async function scoutCodeLogin() {
   const code = input.value.replace(/\D/g, "");
   const errEl = document.getElementById("login-scout-error");
   errEl.style.display = "none";
-  if (code.length !== 6) { errEl.textContent = "Enter your 6-digit scout code."; errEl.style.display = ""; return; }
+  if (code.length !== SCOUT_CODE_LENGTH) { errEl.textContent = `Enter your ${SCOUT_CODE_LENGTH}-digit scout code.`; errEl.style.display = ""; return; }
 
   const btn = document.getElementById("login-scout-btn");
   btn.disabled = true; btn.textContent = "Signing in…";
@@ -141,9 +142,9 @@ async function scoutAdminLogin() {
 document.getElementById("login-scout-code").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); scoutCodeLogin(); }
 });
-// Sign in as soon as all 6 digits are typed
+// Sign in as soon as all the digits are typed (a space in the middle is fine)
 document.getElementById("login-scout-code").addEventListener("input", (e) => {
-  if (e.target.value.replace(/\D/g, "").length === 6) scoutCodeLogin();
+  if (e.target.value.replace(/\D/g, "").length === SCOUT_CODE_LENGTH) scoutCodeLogin();
 });
 document.getElementById("login-admin-pw").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); scoutAdminLogin(); }

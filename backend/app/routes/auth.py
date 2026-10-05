@@ -352,10 +352,10 @@ def remove_allowed_email(
 
 
 # ---------------------------------------------------------------------------
-# Scout login: just a 6-digit code (no name to pick, so no public list of scouts).
+# Scout login: just an 8-digit code (no name to pick, so no public list of scouts).
 # Codes are stored as-is so admins can see, print and export them.
 # ---------------------------------------------------------------------------
-SCOUT_CODE_LENGTH = 6
+SCOUT_CODE_LENGTH = 8  # 100 million possible codes, so guessing one is impractical
 
 # Only *wrong* codes count, so a whole troop signing in on one Wi-Fi isn't blocked.
 # The overall cap stops someone guessing codes from many addresses at once.

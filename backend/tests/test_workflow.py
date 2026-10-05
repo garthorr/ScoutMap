@@ -38,7 +38,7 @@ def _login(client, code):
 def test_new_scout_gets_code_and_signs_in_with_it_alone(client, db):
     scout = client.post("/api/scout/roster", json={"name": "Jane Doe"}, headers=_admin(db)).json()
     code = scout["login_code"]
-    assert len(code) == 6 and code.isdigit()
+    assert len(code) == 8 and code.isdigit()
     r = _login(client, code)
     assert r.status_code == 200 and r.json()["scout_name"] == "Jane Doe"
     # The scout app learns the full name from /me
@@ -50,13 +50,14 @@ def test_new_scout_gets_code_and_signs_in_with_it_alone(client, db):
 
 
 def test_wrong_or_inactive_code_fails(client, db):
-    db.add_all([ScoutRoster(name="Active", login_code="111111"),
-                ScoutRoster(name="Gone", login_code="222222", active=False)])
+    db.add_all([ScoutRoster(name="Active", login_code="11111111"),
+                ScoutRoster(name="Gone", login_code="22222222", active=False)])
     db.commit()
-    assert _login(client, "999999").status_code == 401
-    assert _login(client, "222222").status_code == 401
+    assert _login(client, "99999999").status_code == 401
+    assert _login(client, "22222222").status_code == 401
     assert _login(client, "12").status_code == 401
-    assert _login(client, " 111 111 ").status_code == 200  # spaces are ignored
+    assert _login(client, "111111").status_code == 401  # old 6-digit style is not enough
+    assert _login(client, " 1111 1111 ").status_code == 200  # spaces are ignored
 
 
 def test_regenerate_replaces_code_and_signs_out(client, db):
@@ -85,11 +86,11 @@ def test_csv_import_returns_codes(client, db):
     r = client.post("/api/scout/roster/import", files={"file": ("r.csv", csv_file, "text/csv")},
                     headers=_admin(db)).json()
     assert {s["name"] for s in r["scouts"]} == {"John Smith", "Alex Lee"}
-    assert all(len(s["login_code"]) == 6 for s in r["scouts"])
+    assert all(len(s["login_code"]) == 8 for s in r["scouts"])
 
 
 def test_scouts_cannot_regenerate_codes(client, db):
-    s = ScoutRoster(name="Jane Doe", login_code="123456")
+    s = ScoutRoster(name="Jane Doe", login_code="12345678")
     db.add(s)
     db.commit()
     r = client.post(f"/api/auth/scout-code/{s.id}/regenerate", headers=_session(db, f"scout:{s.id}"))
@@ -97,25 +98,25 @@ def test_scouts_cannot_regenerate_codes(client, db):
 
 
 def test_many_correct_logins_from_one_wifi_are_fine(client, db):
-    db.add(ScoutRoster(name="Jane", login_code="123456"))
+    db.add(ScoutRoster(name="Jane", login_code="12345678"))
     db.commit()
-    assert all(_login(client, "123456").status_code == 200 for _ in range(25))
+    assert all(_login(client, "12345678").status_code == 200 for _ in range(25))
 
 
 def test_guessing_codes_gets_blocked(client, db):
-    db.add(ScoutRoster(name="Jane", login_code="123456"))
+    db.add(ScoutRoster(name="Jane", login_code="12345678"))
     db.commit()
     for i in range(10):
-        assert _login(client, f"{i:06d}").status_code == 401
+        assert _login(client, f"{i:08d}").status_code == 401
     # Blocked now, even with the right code
-    assert _login(client, "123456").status_code == 429
+    assert _login(client, "12345678").status_code == 429
 
 
 def test_guessing_from_many_addresses_hits_overall_cap(client, db):
     # Simulate failures already recorded from many different addresses
     import time
     auth._failed_scout_logins["all"] = [time.time()] * auth._SCOUT_FAIL_MAX_TOTAL
-    assert _login(client, "000000").status_code == 429
+    assert _login(client, "00000000").status_code == 429
 
 
 # --- Map grouping ------------------------------------------------------------
@@ -175,7 +176,7 @@ def test_scout_group_list_sorts_numbers_naturally(client, db):
 def test_checklist_counts(client, db):
     ev, rows = _event_with_houses(db, [("1", "ELM", "G1"), ("2", "ELM", "G1"), ("3", "OAK", None)])
     db.add(Visit(event_house_id=rows[0].id, scout_name="Jane", donation_amount=20))
-    db.add_all([ScoutRoster(name="Ready", login_code="111111"), ScoutRoster(name="Gone", login_code="222222", active=False)])
+    db.add_all([ScoutRoster(name="Ready", login_code="11111111"), ScoutRoster(name="Gone", login_code="22222222", active=False)])
     db.commit()
     c = client.get(f"/api/stats/checklist?event_id={ev.id}", headers=_admin(db)).json()
     assert c["houses"] == 3 and c["grouped"] == 2 and c["groups"] == 1

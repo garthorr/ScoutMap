@@ -14,7 +14,7 @@ from app.routes import auth
 from conftest import _session
 
 
-def _scout(db, name="Jane Doe", code="123456"):
+def _scout(db, name="Jane Doe", code="12345678"):
     s = ScoutRoster(name=name, scout_id="1234", login_code=code)
     db.add(s)
     db.commit()
@@ -46,7 +46,7 @@ def test_only_admins_see_roster_and_codes(client, db):
     s = _scout(db)
     assert client.get("/api/scout/roster", headers=_session(db, f"scout:{s.id}")).status_code == 403
     rows = client.get("/api/scout/roster", headers=_session(db, "admin")).json()
-    assert rows[0]["name"] == "Jane Doe" and rows[0]["login_code"] == "123456"
+    assert rows[0]["name"] == "Jane Doe" and rows[0]["login_code"] == "12345678"
 
 
 def test_code_locked_after_too_many_wrong_guesses(client, db):
