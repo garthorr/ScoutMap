@@ -16,7 +16,8 @@ let formFields = []; // dynamic field config from server
 
 // --- Auth ---
 let _authToken = localStorage.getItem("scoutmap_token") || "";
-let _loginRoster = [];
+let isScoutSession = false;  // true when a scout signed in with their code (vs. an admin)
+const SCOUT_CODE_LENGTH = 8;
 
 function authFetch(url, opts = {}) {
   opts.headers = opts.headers || {};
@@ -28,8 +29,14 @@ async function _checkAuth() {
   if (!_authToken) { _showLoginOverlay(); return; }
   try {
     const r = await authFetch(API + "/api/auth/me");
-    if (r.ok) { _hideLoginOverlay(); }
-    else { _authToken = ""; localStorage.removeItem("scoutmap_token"); _showLoginOverlay(); }
+    if (r.ok) {
+      const me = await r.json();
+      isScoutSession = !!me.is_scout;
+      if (isScoutSession) scoutName = me.name;
+      _afterLogin();
+    } else {
+      _authToken = ""; localStorage.removeItem("scoutmap_token"); _showLoginOverlay();
+    }
   } catch { _showLoginOverlay(); }
 }
 
@@ -37,7 +44,7 @@ function _showLoginOverlay() {
   document.getElementById("login-overlay").classList.add("active");
   document.querySelector("header").style.display = "none";
   document.querySelector(".container").style.display = "none";
-  _loadLoginRoster();
+  document.getElementById("login-scout-code").focus();
 }
 function _hideLoginOverlay() {
   document.getElementById("login-overlay").classList.remove("active");
@@ -45,20 +52,18 @@ function _hideLoginOverlay() {
   document.querySelector(".container").style.display = "";
 }
 
-async function _loadLoginRoster() {
-  const sel = document.getElementById("login-scout-select");
-  try {
-    const r = await fetch(API + "/api/auth/scout-roster");
-    _loginRoster = await r.json();
-  } catch {
-    _loginRoster = [];
-  }
-  if (_loginRoster.length) {
-    sel.innerHTML = '<option value="">Select your name...</option>' +
-      _loginRoster.map(s => `<option value="${esc(s.id)}">${esc(s.name)}${s.scout_id ? " (" + esc(s.scout_id) + ")" : ""}</option>`).join("");
-  } else {
-    sel.innerHTML = '<option value="">No scouts available</option>';
-  }
+/** Set up the app once we know who is signed in. */
+function _afterLogin() {
+  _hideLoginOverlay();
+  // Scouts are already identified by their code; admins pick who they're recording for
+  document.getElementById("scout-self").style.display = isScoutSession ? "" : "none";
+  document.getElementById("scout-pick").style.display = isScoutSession ? "none" : "";
+  document.getElementById("scout-self-name").textContent = scoutName;
+  if (!isScoutSession) loadRoster();
+  loadEvents();
+  loadFormFieldConfig();
+  updateBadge();
+  checkReady();
 }
 
 function showAdminLogin() {
@@ -70,35 +75,35 @@ function showScoutLogin() {
   document.getElementById("login-step-admin").style.display = "none";
 }
 
-async function scoutPasswordLogin() {
-  const scoutId = document.getElementById("login-scout-select").value;
-  const password = document.getElementById("login-scout-password").value;
+async function scoutCodeLogin() {
+  const input = document.getElementById("login-scout-code");
+  const code = input.value.replace(/\D/g, "");
   const errEl = document.getElementById("login-scout-error");
   errEl.style.display = "none";
-
-  if (!scoutId) { errEl.textContent = "Select your name."; errEl.style.display = ""; return; }
-  if (!password) { errEl.textContent = "Enter your password."; errEl.style.display = ""; return; }
+  if (code.length !== SCOUT_CODE_LENGTH) { errEl.textContent = `Enter your ${SCOUT_CODE_LENGTH}-digit scout code.`; errEl.style.display = ""; return; }
 
   const btn = document.getElementById("login-scout-btn");
   btn.disabled = true; btn.textContent = "Signing in…";
   try {
     const r = await fetch(API + "/api/auth/scout-login", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scout_id: scoutId, password }),
+      body: JSON.stringify({ code }),
     });
     const data = await r.json();
     if (r.ok && data.token) {
       _authToken = data.token;
       localStorage.setItem("scoutmap_token", _authToken);
+      isScoutSession = true;
       scoutName = data.scout_name;
       scoutIdNum = data.scout_id || "";
       localStorage.setItem("scoutmap_scout", JSON.stringify({
         name: data.scout_name, id: data.scout_id || "", roster_id: data.roster_id
       }));
-      _hideLoginOverlay();
-      loadRoster(); loadEvents(); loadFormFieldConfig();
+      input.value = "";
+      _afterLogin();
     } else {
-      errEl.textContent = data.detail || "Invalid credentials."; errEl.style.display = "";
+      errEl.textContent = data.detail || "That code didn't work."; errEl.style.display = "";
+      input.select();
     }
   } catch (err) {
     errEl.textContent = "Network error: " + err.message; errEl.style.display = "";
@@ -123,8 +128,8 @@ async function scoutAdminLogin() {
     if (r.ok && data.token) {
       _authToken = data.token;
       localStorage.setItem("scoutmap_token", _authToken);
-      _hideLoginOverlay();
-      loadRoster(); loadEvents(); loadFormFieldConfig();
+      isScoutSession = false;
+      _afterLogin();
     } else {
       errEl.textContent = data.detail || "Incorrect password."; errEl.style.display = "";
     }
@@ -134,8 +139,12 @@ async function scoutAdminLogin() {
   btn.disabled = false; btn.textContent = "Sign In";
 }
 
-document.getElementById("login-scout-password").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { e.preventDefault(); scoutPasswordLogin(); }
+document.getElementById("login-scout-code").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); scoutCodeLogin(); }
+});
+// Sign in as soon as all the digits are typed (a space in the middle is fine)
+document.getElementById("login-scout-code").addEventListener("input", (e) => {
+  if (e.target.value.replace(/\D/g, "").length === SCOUT_CODE_LENGTH) scoutCodeLogin();
 });
 document.getElementById("login-admin-pw").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); scoutAdminLogin(); }
@@ -168,6 +177,7 @@ function updateBadge() {
 }
 
 function saveScoutInfo() {
+  if (isScoutSession) { updateBadge(); return; }  // name comes from the code login
   const sel = document.getElementById("scout-select");
   const val = sel.value;
 
@@ -192,6 +202,7 @@ function scoutLogout() {
   _authToken = "";
   localStorage.removeItem("scoutmap_token");
   localStorage.removeItem("scoutmap_scout");
+  isScoutSession = false;
   scoutName = "";
   scoutIdNum = "";
   selectedEventId = "";
@@ -222,7 +233,7 @@ async function loadRoster() {
     rosterData = [];
   }
 
-  sel.innerHTML = '<option value="">Select your name...</option>' +
+  sel.innerHTML = '<option value="">Select a scout...</option>' +
     rosterData.map(s => `<option value="${esc(s.id)}">${esc(s.name)}${s.scout_id ? " (" + esc(s.scout_id) + ")" : ""}</option>`).join("") +
     '<option value="__other__">Other (write in)</option>';
 
@@ -300,7 +311,9 @@ document.getElementById("group-select").onchange = () => {
 function checkReady() {
   const sel = document.getElementById("scout-select").value;
   let nameOk = false;
-  if (sel === "__other__") {
+  if (isScoutSession) {
+    nameOk = !!scoutName;
+  } else if (sel === "__other__") {
     nameOk = !!document.getElementById("other-name").value.trim();
   } else {
     nameOk = !!sel;
@@ -579,14 +592,8 @@ async function saveVisit() {
 }
 
 // --- Init ---
-_checkAuth().then(() => {
-  if (_authToken) {
-    restoreScoutInfo();
-    loadRoster();
-    loadEvents();
-    loadFormFieldConfig();
-  }
-});
+restoreScoutInfo();  // an admin's last pick; scouts get their name from the server
+_checkAuth();
 
 // Tap-to-dismiss for any future toasts if added
 document.addEventListener("click", (e) => {

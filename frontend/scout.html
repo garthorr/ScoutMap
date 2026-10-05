@@ -255,19 +255,14 @@
         <h2>ScoutMap</h2>
         <p class="login-subtitle">Field Entry</p>
 
-        <!-- Scout password login (default) -->
+        <!-- Scout code login (default) -->
         <div id="login-step-scout">
           <div class="field">
-            <label for="login-scout-select">Your Name</label>
-            <select id="login-scout-select">
-              <option value="">Loading scouts...</option>
-            </select>
+            <label for="login-scout-code">Your Scout Code</label>
+            <input id="login-scout-code" type="text" placeholder="8-digit code" autocomplete="off" inputmode="numeric" maxlength="9"
+                   style="font-size:24px;letter-spacing:5px;text-align:center;" />
           </div>
-          <div class="field">
-            <label for="login-scout-password">Password</label>
-            <input id="login-scout-password" type="password" placeholder="6-digit password" autocomplete="current-password" inputmode="numeric" maxlength="6" pattern="[0-9]*" />
-          </div>
-          <button class="btn" id="login-scout-btn" onclick="scoutPasswordLogin()">Sign In</button>
+          <button class="btn" id="login-scout-btn" onclick="scoutCodeLogin()">Sign In</button>
           <p id="login-scout-error" class="error-msg" style="display:none"></p>
           <button class="login-switch" onclick="showAdminLogin()">Admin Sign In</button>
         </div>
@@ -299,8 +294,10 @@
     <div id="setup-screen" class="screen active">
       <div class="card">
         <h2>Scout Information</h2>
+        <p id="scout-self" style="display:none;font-size:18px;">Signed in as <strong id="scout-self-name"></strong></p>
+        <div id="scout-pick">
         <div class="field">
-          <label for="scout-select">Your Name</label>
+          <label for="scout-select">Recording for</label>
           <select id="scout-select">
             <option value="">Loading roster...</option>
           </select>
@@ -314,6 +311,7 @@
             <label for="other-id">Scout ID (optional)</label>
             <input id="other-id" type="text" placeholder="ID Number" autocomplete="off" />
           </div>
+        </div>
         </div>
       </div>
       <div class="card">
@@ -356,6 +354,6 @@
     </div>
   </div>
 
-  <script src="/static/scout.js"></script>
+  <script src="/static/scout.js?v=4"></script>
 </body>
 </html>

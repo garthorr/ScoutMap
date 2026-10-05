@@ -194,6 +194,7 @@ h3 {
 .check-title { font-weight: 600; }
 .checklist li.done .check-title { color: var(--sa-gray); }
 .check-detail { font-size: 13px; color: var(--sa-gray); word-break: break-word; }
+code.login-code { font-size: 16px; letter-spacing: 2px; font-weight: 700; }
 .btn-sm.btn-quiet { background: var(--sa-pale-gray); }
 .btn-sm.btn-quiet:hover { background: var(--sa-gray); }
 

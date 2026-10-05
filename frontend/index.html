@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ScoutMap</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=3" />
 </head>
 <body>
   <!-- Login Overlay -->
@@ -323,10 +323,9 @@
     <!-- Roster -->
     <section id="page-roster" class="page">
       <h2>Scout Roster</h2>
-      <div id="roster-new-passwords" class="card card-highlight hidden"></div>
       <div class="card">
         <h3>Add Scout</h3>
-        <p class="help-text">Each scout gets a random 6-digit password. It's shown only once, so write it down or print it. Lost one? Click <strong>New password</strong>.</p>
+        <p class="help-text">Each scout gets an 8-digit code and signs in to the scout app with just that code. Codes are listed below, where you can print sign-in cards or export them. If a code is lost or shared, click <strong>New code</strong>.</p>
         <form id="roster-form" class="inline-form">
           <span class="tooltip-wrap">
             <input name="name" placeholder="Scout name" required />
@@ -344,7 +343,7 @@
         <details class="source-guides">
           <summary>CSV Format Guide</summary>
           <p style="margin:8px 0 4px;font-size:13px;color:var(--sa-gray);line-height:1.6;">
-            Upload a CSV file with a <strong>header row</strong>. Required column: <code>name</code>. Optional column: <code>scout_id</code>. Extra columns are ignored. Duplicate names are skipped. Passwords are created for you.
+            Upload a CSV file with a <strong>header row</strong>. Required column: <code>name</code>. Optional column: <code>scout_id</code>. Extra columns are ignored. Duplicate names are skipped. Sign-in codes are created for you.
           </p>
           <pre style="background:#f5f5f0;padding:10px 14px;border-radius:6px;font-size:13px;margin-top:6px;overflow-x:auto;">name,scout_id
 John Smith,12345
@@ -357,9 +356,11 @@ Alex Johnson,</pre>
         </form>
         <div id="roster-import-status" class="hidden" style="margin-top:8px;font-size:14px;"></div>
       </div>
-      <div id="roster-missing-passwords"></div>
+      <div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn-sm" onclick="printScoutCards()">Print sign-in cards</button>
+        <button class="btn-sm" onclick="exportRosterCSV()">Export CSV (with codes)</button>
+      </div>
       <div id="roster-list" class="card-list"></div>
-      <div style="margin-top:12px;"><button class="btn-sm" onclick="exportRosterCSV()">Export Roster CSV</button></div>
     </section>
 
     <!-- Scout Data -->
@@ -501,6 +502,6 @@ Alex Johnson,</pre>
 
   <div id="operation-status"><span class="loading-spinner"></span><span id="operation-status-text"></span></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

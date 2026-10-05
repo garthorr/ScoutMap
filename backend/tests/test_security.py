@@ -14,8 +14,8 @@ from app.routes import auth
 from conftest import _session
 
 
-def _scout(db, name="Jane Doe"):
-    s = ScoutRoster(name=name, scout_id="1234", password_hash=auth._hash_password("secret1"))
+def _scout(db, name="Jane Doe", code="12345678"):
+    s = ScoutRoster(name=name, scout_id="1234", login_code=code)
     db.add(s)
     db.commit()
     return s
@@ -36,25 +36,17 @@ def test_admin_can_read_admin_data(client, db):
     assert client.get("/api/events/", headers=headers).status_code == 200
 
 
-def test_public_roster_shows_first_name_last_initial(client, db):
-    _scout(db, "Jane Marie Doe")
-    rows = client.get("/api/auth/scout-roster").json()
-    assert rows[0]["name"] == "Jane D."
-    assert "scout_id" not in rows[0]
+def test_scout_list_is_not_public(client, db):
+    _scout(db)
+    assert client.get("/api/auth/scout-roster").status_code == 404   # old public list is gone
+    assert client.get("/api/scout/roster").status_code == 401
 
 
-def test_scout_sees_short_names_admin_sees_full(client, db):
+def test_only_admins_see_roster_and_codes(client, db):
     s = _scout(db)
-    scout_rows = client.get("/api/scout/roster", headers=_session(db, f"scout:{s.id}")).json()
-    admin_rows = client.get("/api/scout/roster", headers=_session(db, "admin")).json()
-    assert scout_rows[0]["name"] == "Jane D." and scout_rows[0]["scout_id"] is None
-    assert admin_rows[0]["name"] == "Jane Doe"
-
-
-def test_short_name():
-    assert auth._short_name("Jane Doe") == "Jane D."
-    assert auth._short_name("Cher") == "Cher"
-    assert auth._short_name("") == ""
+    assert client.get("/api/scout/roster", headers=_session(db, f"scout:{s.id}")).status_code == 403
+    rows = client.get("/api/scout/roster", headers=_session(db, "admin")).json()
+    assert rows[0]["name"] == "Jane Doe" and rows[0]["login_code"] == "12345678"
 
 
 def test_code_locked_after_too_many_wrong_guesses(client, db):
