@@ -262,20 +262,74 @@ async function removeAllowedEmail(id) {
 }
 
 // --- CSV Export Utility ---
+/** One CSV field. Text that Excel would run as a formula gets a leading ' (same rule as the server's safe_cell). */
+function _csvCell(v) {
+  let s = String(v ?? "");
+  if (typeof v !== "number" && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
 function exportCSV(filename, headers, rows) {
-  const escape = (v) => {
-    const s = String(v ?? "");
-    return s.includes(",") || s.includes('"') || s.includes("\n")
-      ? '"' + s.replace(/"/g, '""') + '"' : s;
-  };
-  const lines = [headers.map(escape).join(",")];
-  rows.forEach(r => lines.push(r.map(escape).join(",")));
-  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const lines = [headers.map(_csvCell).join(",")];
+  rows.forEach(r => lines.push(r.map(_csvCell).join(",")));
+  // The BOM makes Excel read the file as UTF-8
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  _saveBlob(blob, filename);
+}
+
+function _saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  a.remove();
+  // Revoking right away can cancel the download in Firefox and Safari
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+/** Download a server-generated file (needs the Bearer token, so a plain link won't do). */
+async function downloadFromServer(url, fallbackName) {
+  _showStatus("Preparing export…");
+  try {
+    const r = await authFetch(url);
+    if (!r.ok) {
+      let detail = `${r.status} ${r.statusText}`.trim();
+      try {
+        const d = await r.json();
+        if (d.detail) detail = typeof d.detail === "string" ? d.detail : JSON.stringify(d.detail);
+      } catch { /* not JSON */ }
+      _hideStatus();
+      alert("Export failed: " + detail);
+      return;
+    }
+    const blob = await r.blob();
+    const m = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "");
+    _saveBlob(blob, m ? m[1] : fallbackName);
+    _flashStatus("Export downloaded.");
+  } catch (err) {
+    _hideStatus();
+    alert("Export failed: " + err.message);
+  }
+}
+
+/** Total row count from the X-Total-Count header; falls back to what's been seen so far. */
+function _totalCount(r, offset, count) {
+  const n = parseInt(r.headers.get("X-Total-Count"), 10);
+  return Number.isNaN(n) ? offset + count : n;
+}
+
+/** "Showing A–B of N" plus Prev/Next buttons that call fnName(page). */
+function _pagerHtml(fnName, page, pageSize, count, total) {
+  const start = page * pageSize;
+  const last = Math.max(0, Math.ceil(total / pageSize) - 1);
+  return `<div class="pager">
+    <span>Showing ${(start + 1).toLocaleString()}–${(start + count).toLocaleString()} of ${total.toLocaleString()}</span>
+    <button class="btn-sm" onclick="${fnName}(${page - 1})" ${page <= 0 ? "disabled" : ""}>Prev</button>
+    <button class="btn-sm" onclick="${fnName}(${page + 1})" ${page >= last ? "disabled" : ""}>Next</button>
+  </div>`;
 }
 
 // --- Navigation ---
@@ -1789,11 +1843,11 @@ async function loadImports() {
   document.getElementById("imports-list").innerHTML = imports.length
     ? `<table><tr><th>Import</th><th>Records</th><th>Status</th><th>Date</th><th></th></tr>` +
       imports.map(i => `<tr>
-        <td>${importTitle(i)}</td>
-        <td>${i.record_count}</td>
-        <td><span class="badge badge-${i.status}">${i.status}</span></td>
+        <td>${esc(importTitle(i))}</td>
+        <td>${esc(i.record_count)}</td>
+        <td><span class="badge badge-${esc(i.status)}">${esc(i.status)}</span></td>
         <td>${new Date(i.created_at).toLocaleString()}</td>
-        <td><button class="btn-sm btn-danger" onclick="deleteImport('${i.id}')">Delete</button></td>
+        <td><button class="btn-sm btn-danger" onclick="deleteImport('${esc(i.id)}')">Delete</button></td>
       </tr>`).join("") + `</table>`
     : "<p>No imports yet.</p>";
 }
@@ -1813,30 +1867,84 @@ async function deleteImport(id) {
   }
 }
 
-async function loadUnmatched() {
-  const r = await authFetch(API + "/api/imports/unmatched/");
+const UNMATCHED_PAGE = 100;
+let _unmatchedPage = 0;
+let _unmatchedLoadSeq = 0;
+
+/** page omitted = reload the page currently shown. */
+async function loadUnmatched(page) {
+  if (page == null) page = _unmatchedPage;
+  page = Math.max(0, page);
+  _unmatchedPage = page;
+  const seq = ++_unmatchedLoadSeq;
+  const offset = page * UNMATCHED_PAGE;
+  const params = new URLSearchParams({ limit: UNMATCHED_PAGE, offset });
+  const r = await authFetch(API + "/api/imports/unmatched/?" + params);
+  if (seq !== _unmatchedLoadSeq) return;  // a newer load has started
+  const el = document.getElementById("unmatched-list");
+  if (!r.ok) { el.innerHTML = "<p>Failed to load unmatched records.</p>"; return; }
   const records = await r.json();
-  document.getElementById("unmatched-list").innerHTML = records.length
+  if (seq !== _unmatchedLoadSeq) return;
+  const total = _totalCount(r, offset, records.length);
+  if (!records.length && total > 0 && page > 0) {
+    // Records were removed since this page was shown: go to the last page that still has some
+    loadUnmatched(Math.ceil(total / UNMATCHED_PAGE) - 1);
+    return;
+  }
+  el.innerHTML = records.length
     ? `<table><tr><th>Source</th><th>Address</th><th>Status</th></tr>` +
       records.map(u => `<tr>
-        <td>${u.source_name}</td>
-        <td>${u.raw_address || "—"}</td>
-        <td><span class="badge badge-${u.status}">${u.status}</span></td>
-      </tr>`).join("") + `</table>`
+        <td>${esc(u.source_name)}</td>
+        <td>${esc(u.raw_address) || "—"}</td>
+        <td><span class="badge badge-${esc(u.status)}">${esc(u.status)}</span></td>
+      </tr>`).join("") + `</table>` +
+      _pagerHtml("loadUnmatched", page, UNMATCHED_PAGE, records.length, total)
     : "<p>No unmatched records.</p>";
 }
 
 // --- Houses ---
-async function loadHouses() {
-  document.getElementById("houses-list").innerHTML = '<div class="loading-bar"></div>';
+const HOUSE_PAGE = 100;
+let _housePage = 0;
+let _houseFilterKey = "";
+let _houseLoadSeq = 0;
+
+function _houseFilterParams() {
   const search = document.getElementById("house-search")?.value || "";
   const zip = document.getElementById("house-zip")?.value || "";
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (zip) params.set("zip_code", zip);
+  return params;
+}
+
+/** page omitted = stay on the current page, unless the search/ZIP changed since the last load. */
+async function loadHouses(page) {
+  const filters = _houseFilterParams();
+  const filterKey = filters.toString();
+  if (page == null) page = filterKey === _houseFilterKey ? _housePage : 0;
+  page = Math.max(0, page);
+  _houseFilterKey = filterKey;
+  _housePage = page;
+  const seq = ++_houseLoadSeq;
+
+  const listEl = document.getElementById("houses-list");
+  listEl.innerHTML = '<div class="loading-bar"></div>';
+  const offset = page * HOUSE_PAGE;
+  const params = new URLSearchParams(filters);
+  params.set("limit", HOUSE_PAGE);
+  params.set("offset", offset);
   const r = await authFetch(API + "/api/houses/?" + params);
+  if (seq !== _houseLoadSeq) return;  // a newer search or page click has started
+  if (!r.ok) { listEl.innerHTML = "<p>Failed to load houses.</p>"; return; }
   const houses = await r.json();
-  document.getElementById("houses-list").innerHTML = houses.length
+  if (seq !== _houseLoadSeq) return;
+  const total = _totalCount(r, offset, houses.length);
+  if (!houses.length && total > 0 && page > 0) {
+    // Houses were deleted since this page was shown: go to the last page that still has some
+    loadHouses(Math.ceil(total / HOUSE_PAGE) - 1);
+    return;
+  }
+  listEl.innerHTML = houses.length
     ? `<table><tr><th>Address</th><th>City</th><th>ZIP</th><th>Owner</th><th>Source</th></tr>` +
       houses.map(h => `<tr>
         <td>${esc(h.full_address)}</td>
@@ -1844,27 +1952,13 @@ async function loadHouses() {
         <td>${esc(h.zip_code)}</td>
         <td>${esc(h.owner_name) || "—"}</td>
         <td>${h.manually_created ? "Manual" : "Imported"}</td>
-      </tr>`).join("") + `</table>`
+      </tr>`).join("") + `</table>` +
+      _pagerHtml("loadHouses", page, HOUSE_PAGE, houses.length, total)
     : "<p>No houses found.</p>";
 }
 
-async function exportHousesCSV() {
-  const search = document.getElementById("house-search")?.value || "";
-  const zip = document.getElementById("house-zip")?.value || "";
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  if (zip) params.set("zip_code", zip);
-  const r = await authFetch(API + "/api/houses/?" + params);
-  const houses = await r.json();
-  if (!houses.length) { alert("No houses to export."); return; }
-  exportCSV("houses.csv",
-    ["Address", "City", "ZIP", "Owner", "Appraised Value", "Latitude", "Longitude", "Source"],
-    houses.map(h => [
-      h.full_address, h.city || "", h.zip_code || "", h.owner_name || "",
-      h.total_appraised_value || "", h.latitude || "", h.longitude || "",
-      h.manually_created ? "Manual" : "Imported",
-    ])
-  );
+function exportHousesCSV() {
+  return downloadFromServer(API + "/api/houses/export.csv?" + _houseFilterParams(), "houses.csv");
 }
 
 document.getElementById("manual-house-form").onsubmit = async (e) => {
@@ -2038,8 +2132,7 @@ function _scoutDataUrl(offset) {
 async function loadScoutData() {
   document.getElementById("scout-summary").innerHTML = '<div class="loading-bar"></div>';
   document.getElementById("scout-data-list").innerHTML = '<div class="loading-bar"></div>';
-  const eventId = document.getElementById("sd-event-filter").value;
-  const params = eventId ? "?event_id=" + encodeURIComponent(eventId) : "";
+  const params = _scoutDataEventQuery();
 
   const [dataR, summaryR] = await Promise.all([
     authFetch(_scoutDataUrl(0)),
@@ -2112,24 +2205,17 @@ function renderScoutDataList() {
   }
 }
 
-async function exportScoutDataCSV() {
-  // Export everything, not just the pages shown on screen
-  while (_scoutDataCache.length < _scoutDataTotal) {
-    if (!(await _fetchMoreScoutData())) break;
-  }
-  renderScoutDataList();
-  if (!_scoutDataCache.length) { alert("No data to export."); return; }
-  exportCSV("scout-data.csv",
-    ["Time", "Scout", "Scout ID", "Event", "Group", "Address", "ZIP", "Door Answer", "Donation", "Amount", "Former Scout", "Avoid House", "Notes", "Entered By"],
-    _scoutDataCache.map(v => [
-      v.visited_at || "", v.scout_name || "", v.scout_id || "", v.event_name || "",
-      v.group_label || "", v.address || "", v.zip_code || "",
-      v.door_answer == null ? "" : v.door_answer ? "Yes" : "No",
-      v.donation_given == null ? "" : v.donation_given ? "Yes" : "No",
-      v.donation_amount || "", v.former_scout == null ? "" : v.former_scout ? "Yes" : "No",
-      v.avoid_house ? "Yes" : "No", v.notes || "", v.entered_by || "Scout",
-    ])
-  );
+function _scoutDataEventQuery() {
+  const eventId = document.getElementById("sd-event-filter").value;
+  return eventId ? "?event_id=" + encodeURIComponent(eventId) : "";
+}
+
+function exportScoutDataCSV() {
+  return downloadFromServer(API + "/api/scout/data.csv" + _scoutDataEventQuery(), "scout-data.csv");
+}
+
+function exportScoutSummaryCSV() {
+  return downloadFromServer(API + "/api/scout/data/summary.csv" + _scoutDataEventQuery(), "scout-summary.csv");
 }
 
 // --- Scout Form Fields ---
@@ -2296,11 +2382,11 @@ if ("serviceWorker" in navigator) {
  * Reset all house filter inputs and reload the full list.
  */
 function clearHouseFilters() {
-    const addr = document.getElementById('house-address');
+    const addr = document.getElementById('house-search');
     const zip = document.getElementById('house-zip');
     if (addr) addr.value = '';
     if (zip) zip.value = '';
-    loadHouses();
+    loadHouses(0);
 }
 
 /**

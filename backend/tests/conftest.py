@@ -18,8 +18,8 @@ run_startup()
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import (  # noqa: E402
-    AllowedEmail, AuthCode, AuthSession, EventHouse, FundraiserEvent,
-    MasterHouse, ScoutRoster, Visit,
+    AllowedEmail, AuthCode, AuthSession, EventHouse, FundraiserEvent, HouseSourceLink,
+    MasterHouse, ScoutRoster, SourceImport, UnmatchedRecord, Visit,
 )
 from app.routes import auth  # noqa: E402
 
@@ -30,8 +30,9 @@ def db():
     yield s
     s.rollback()
     # Children before parents so foreign keys don't complain
-    for model in (Visit, EventHouse, MasterHouse, FundraiserEvent,
-                  AuthSession, AuthCode, AllowedEmail, ScoutRoster):
+    # (ScoutFormField rows are seeded at startup and stay)
+    for model in (Visit, EventHouse, HouseSourceLink, UnmatchedRecord, MasterHouse,
+                  SourceImport, FundraiserEvent, AuthSession, AuthCode, AllowedEmail, ScoutRoster):
         s.query(model).delete()
     s.commit()
     s.close()

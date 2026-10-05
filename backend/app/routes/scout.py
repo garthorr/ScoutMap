@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import re
+import uuid
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -12,9 +13,11 @@ from sqlalchemy.orm import Session, contains_eager, joinedload
 from sqlalchemy import func, case
 from typing import Optional
 
+from app import database
+from app.csv_export import csv_response
 from app.database import get_db
 from app.models import (
-    AuthSession, FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster,
+    AuthSession, FundraiserEvent, EventHouse, MasterHouse, Visit, ScoutRoster, ScoutFormField,
 )
 from app.routes.auth import new_scout_code, require_admin
 from app.routes.events import _addr_sort_key
@@ -233,6 +236,26 @@ def list_group_houses(
 # ---------------------------------------------------------------------------
 # Admin: scout data aggregation
 # ---------------------------------------------------------------------------
+def _scout_visits(q, event_id):
+    """Visits entered for a scout, optionally for one event (query must join EventHouse)."""
+    q = q.filter(Visit.scout_name.isnot(None))
+    if event_id:
+        q = q.filter(EventHouse.event_id == event_id)
+    return q
+
+
+def _export_event_id(event_id: Optional[str], db: Session) -> Optional[uuid.UUID]:
+    if not event_id:
+        return None
+    try:
+        eid = uuid.UUID(event_id)
+    except ValueError:
+        raise HTTPException(404, "Event not found")
+    if not db.query(FundraiserEvent.id).filter(FundraiserEvent.id == eid).first():
+        raise HTTPException(404, "Event not found")
+    return eid
+
+
 @router.get("/data")
 def scout_data(
     event_id: Optional[str] = None,
@@ -255,10 +278,8 @@ def scout_data(
             contains_eager(Visit.event_house).contains_eager(EventHouse.house),
             contains_eager(Visit.event_house).contains_eager(EventHouse.event),
         )
-        .filter(Visit.scout_name.isnot(None))
     )
-    if event_id:
-        q = q.filter(EventHouse.event_id == event_id)
+    q = _scout_visits(q, event_id)
 
     visits = q.order_by(Visit.visited_at.desc(), Visit.id).offset(offset).limit(limit).all()
     result = []
@@ -286,13 +307,77 @@ def scout_data(
     return result
 
 
-@router.get("/data/summary")
-def scout_data_summary(
+_VISIT_CSV_HEADER = [
+    "Time", "Scout", "Scout ID", "Event", "Group", "Address", "ZIP",
+    "Door Answer", "Donation", "Amount", "Former Scout", "Avoid House", "Notes",
+    "Outcome", "Entered By",
+]
+
+
+def _visit_csv_rows(event_id: Optional[uuid.UUID], custom_keys: list[str], covered: set[str]):
+    db = database.SessionLocal()
+    try:
+        q = (
+            db.query(
+                Visit.visited_at, Visit.scout_name, Visit.scout_id,
+                FundraiserEvent.name, EventHouse.assigned_to,
+                MasterHouse.full_address, MasterHouse.zip_code,
+                Visit.door_answer, Visit.donation_given, Visit.donation_amount,
+                Visit.former_scout, Visit.avoid_house, Visit.notes,
+                Visit.outcome, Visit.entered_by, Visit.custom_data,
+            )
+            .select_from(Visit)
+            .join(EventHouse, Visit.event_house_id == EventHouse.id)
+            .join(MasterHouse, EventHouse.house_id == MasterHouse.id)
+            .join(FundraiserEvent, EventHouse.event_id == FundraiserEvent.id)
+        )
+        q = _scout_visits(q, event_id).order_by(Visit.visited_at.desc(), Visit.id)
+        for r in q.yield_per(1000):
+            try:
+                custom = json.loads(r.custom_data) if r.custom_data else {}
+            except (json.JSONDecodeError, TypeError):
+                custom = {}
+            if not isinstance(custom, dict):
+                custom = {}
+            other = {k: v for k, v in custom.items() if k not in covered}
+            yield [
+                r.visited_at, r.scout_name, r.scout_id, r.name, r.assigned_to,
+                r.full_address, r.zip_code,
+                r.door_answer, r.donation_given, r.donation_amount,
+                r.former_scout, r.avoid_house, r.notes,
+                r.outcome, r.entered_by or "Scout",
+                *(custom.get(k) for k in custom_keys),
+                other or None,
+            ]
+    finally:
+        db.close()
+
+
+@router.get("/data.csv")
+def scout_data_csv(
     event_id: Optional[str] = None,
     _admin: str = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Aggregate stats for scout data using SQL GROUP BY."""
+    """Every scout visit as CSV, plus a column per extra form field (active or not)."""
+    # visit_entry imports this module, so this import can't be at the top
+    from app.routes.visit_entry import LEGACY_KEYS
+
+    eid = _export_event_id(event_id, db)
+    fields = [
+        (key, label) for key, label in
+        db.query(ScoutFormField.field_key, ScoutFormField.label)
+        .order_by(ScoutFormField.position, ScoutFormField.created_at)
+        .all()
+        if key not in LEGACY_KEYS
+    ]
+    custom_keys = [key for key, _label in fields]
+    header = _VISIT_CSV_HEADER + [label for _key, label in fields] + ["Other Fields"]
+    covered = set(LEGACY_KEYS) | set(custom_keys)
+    return csv_response("scout-data.csv", header, _visit_csv_rows(eid, custom_keys, covered))
+
+
+def _scout_summary(db: Session, event_id) -> dict:
     q = (
         db.query(
             func.coalesce(Visit.scout_name, "Unknown").label("scout_name"),
@@ -308,10 +393,8 @@ def scout_data_summary(
             func.count(case((Visit.avoid_house == True, 1))).label("avoid_houses_raw"),
         )
         .join(EventHouse, Visit.event_house_id == EventHouse.id)
-        .filter(Visit.scout_name.isnot(None))
     )
-    if event_id:
-        q = q.filter(EventHouse.event_id == event_id)
+    q = _scout_visits(q, event_id)
 
     rows = q.group_by(func.coalesce(Visit.scout_name, "Unknown"), Visit.scout_id).all()
 
@@ -340,3 +423,30 @@ def scout_data_summary(
         "total_donations": total_donations,
         "scouts": scouts,
     }
+
+
+@router.get("/data/summary")
+def scout_data_summary(
+    event_id: Optional[str] = None,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Aggregate stats for scout data using SQL GROUP BY."""
+    return _scout_summary(db, event_id)
+
+
+_SUMMARY_COUNTS = ("total_visits", "doors_answered", "donations", "donation_total", "former_scouts", "avoid_houses")
+
+
+@router.get("/data/summary.csv")
+def scout_data_summary_csv(
+    event_id: Optional[str] = None,
+    _admin: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    summary = _scout_summary(db, _export_event_id(event_id, db))
+    rows = [[s["scout_name"], s["scout_id"], *(s[k] for k in _SUMMARY_COUNTS)] for s in summary["scouts"]]
+    rows.append(["TOTAL", None, *(sum(s[k] for s in summary["scouts"]) for k in _SUMMARY_COUNTS)])
+    header = ["Scout", "Scout ID", "Visits", "Doors Answered", "Donations",
+              "Donation Total", "Former Scouts", "Avoid Houses"]
+    return csv_response("scout-summary.csv", header, rows)

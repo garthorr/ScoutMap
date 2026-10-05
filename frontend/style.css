@@ -423,6 +423,9 @@ tr:hover { background: var(--bg-subtle); }
 .btn-sm.btn-danger:hover {
   background: #a80d1e;
 }
+
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; }
+.pager button:disabled { opacity: 0.45; cursor: default; }
 .map-tool {
   background: var(--sa-white);
   color: var(--sa-dark-gray);

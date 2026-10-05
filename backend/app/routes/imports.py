@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks, Query, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -236,8 +236,15 @@ def delete_import(import_id: str, _admin: str = Depends(require_admin), db: Sess
 
 
 @router.get("/unmatched/", response_model=list[UnmatchedRecordOut])
-def list_unmatched(status: str = "pending", db: Session = Depends(get_db)):
+def list_unmatched(
+    response: Response,
+    status: str = "pending",
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
     q = db.query(UnmatchedRecord)
     if status:
         q = q.filter(UnmatchedRecord.status == status)
-    return q.order_by(UnmatchedRecord.created_at.desc()).limit(200).all()
+    response.headers["X-Total-Count"] = str(q.count())
+    return q.order_by(UnmatchedRecord.created_at.desc(), UnmatchedRecord.id).offset(offset).limit(limit).all()
