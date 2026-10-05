@@ -108,6 +108,21 @@ _PUBLIC_PREFIXES = ("/static/", "/api/auth/")
 
 
 @app.middleware("http")
+async def no_stale_frontend(request: Request, call_next):
+    """Make browsers check for a newer page/script on every load.
+
+    Without this, a browser can keep an old app.js after a deploy and run it
+    against the new index.html, which breaks the page.
+    Unchanged files still come back as a quick "304 Not Modified".
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if path in ("/", "/scout") or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Require valid session token for all API routes (except auth endpoints)."""
     path = request.url.path

@@ -152,3 +152,11 @@ def test_checklist_counts(client, db):
     assert c["houses"] == 3 and c["grouped"] == 2 and c["groups"] == 1
     assert c["visits"] == 1 and c["houses_visited"] == 1 and c["donations"] == 20
     assert c["scouts_ready"] == 1 and c["scouts_no_password"] == 1
+
+
+# --- Caching -----------------------------------------------------------------
+
+def test_frontend_files_are_always_revalidated(client):
+    """Stops a browser from running an old app.js against a new index.html."""
+    for path in ("/", "/scout", "/static/app.js", "/static/scout.js", "/static/style.css"):
+        assert client.get(path).headers.get("cache-control") == "no-cache", path
